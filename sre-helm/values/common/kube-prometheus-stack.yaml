@@ -1,0 +1,136 @@
+grafana:
+  persistence:
+    enabled: true
+    size: 5Gi
+  # Hand-applied secret, not the chart's own auto-generation: that relies on
+  # Helm's `lookup` function to preserve the password across renders, which
+  # needs live cluster access ArgoCD's rendering doesn't reliably have —
+  # caused an actual password mismatch (401s) after a second sync. Same
+  # never-commit-secrets pattern as every other credential this session.
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  additionalDataSources:
+    - name: Tempo
+      type: tempo
+      access: proxy
+      url: http://tempo.tempo.svc.cluster.local:3200
+      isDefault: false
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki.loki.svc.cluster.local:3100
+      isDefault: false
+    - name: Thanos
+      type: prometheus   # Thanos Query speaks the Prometheus HTTP API
+      access: proxy
+      url: http://thanos-query.monitoring.svc.cluster.local:10902
+      isDefault: false
+
+  # A separate remote render service (production-recommended shape), not
+  # the in-process plugin — avoids bundling a full headless Chromium into
+  # the main Grafana pod itself. Auto-wires GF_RENDERING_SERVER_URL/
+  # GF_RENDERING_CALLBACK_URL on the main deployment; no manual grafana.ini
+  # needed.
+  imageRenderer:
+    enabled: true
+    # Explicit resources, unlike Thanos's own deliberate no-requests choice
+    # elsewhere in this file — that reasoning (let it schedule best-effort,
+    # no eviction protection) assumes a genuinely lightweight process. This
+    # is a real headless Chromium; letting it run unbounded on a node this
+    # tight risks starving something else instead. Modest requests for
+    # fair scheduling weight, a real memory limit so a runaway render can't
+    # take the node down with it.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+    # Hand-applied secret, never committed — this chart's own token-
+    # generation helper uses the exact same lookup-at-render-time pattern
+    # that caused incident #11's Grafana admin-password mismatch. Sidestepped
+    # the same way: an explicit existingSecret instead of letting the chart
+    # auto-generate a token it can't reliably read back on a second render.
+    existingSecret: grafana-image-renderer-token
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    # Prometheus itself must NOT get an Istio sidecar (ADR-0013 exclusion,
+    # different reason than node-exporter's hostNetwork one): Prometheus's
+    # own outbound PodMonitor scrapes hit raw pod IPs directly, not
+    # Kubernetes Services. When Prometheus has its own sidecar, that
+    # outbound traffic gets intercepted by its own Envoy, whose connection
+    # handling for direct-pod-IP (non-Service) destinations doesn't
+    # correctly isolate concurrent scrapes to different pods — samples
+    # scraped from one pod's target were getting stored under a DIFFERENT
+    # pod's target-identity labels (verified: correct target IP, correct
+    # ingestion, but wrong metric content — reproducible, survived a full
+    # Prometheus restart and a version bump, and stopped completely the
+    # moment this exclusion was added). ServiceMonitor-scraped targets
+    # (Kiali) weren't affected — only PodMonitor's direct-pod-IP path was.
+    # Full investigation: docs/incidents.md #20.
+    podMetadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+    # Thanos sidecar: uploads TSDB blocks to versitygw S3 for long-term
+    # storage/querying beyond local retention (ROADMAP Phase 5). The secret
+    # is hand-applied (never committed) — Thanos has no built-in env-var
+    # expansion for its objstore config the way Tempo/Loki do, so it holds
+    # the literal versitygw root credentials directly, same as the
+    # tempo-s3-credentials/loki-s3-credentials pattern but as one YAML blob
+    # instead of separate keys, since that's the shape objectStorageConfig
+    # requires.
+    thanos:
+      objectStorageConfig:
+        existingSecret:
+          key: objstore.yml
+          name: thanos-objstore-config
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+    # Mounted at /etc/alertmanager/secrets/alertmanager-slack-webhook/ —
+    # hand-applied per cluster (never committed), same pattern as every
+    # other credential this session. The name is common; the Secret itself
+    # is cluster-specific, since each cluster's alerts go to whichever
+    # Slack workspace/channel that cluster's operator actually wants.
+    secrets:
+      - alertmanager-slack-webhook
+  config:
+    # Deep-merges with the chart's own default inhibit_rules/templates —
+    # only route.receiver and receivers are touched here, so Watchdog stays
+    # routed to 'null' (chart default, untouched) while everything else now
+    # goes to Slack instead of nowhere.
+    route:
+      receiver: 'slack-notifications'
+    receivers:
+      - name: 'null'
+      - name: 'slack-notifications'
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-slack-webhook/webhook-url
+            send_resolved: true
+
+# node-exporter is the one component in monitoring that stays excluded —
+# hostNetwork: true, and Istio's sidecar can't be safely injected into a
+# hostNetwork pod (ADR-0013). Prometheus, Alertmanager, the Operator, and
+# kube-state-metrics get sidecars along with everything else in the
+# namespace now.
+prometheus-node-exporter:
+  podAnnotations:
+    sidecar.istio.io/inject: "false"

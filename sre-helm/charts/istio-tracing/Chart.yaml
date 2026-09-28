@@ -1,0 +1,11 @@
+apiVersion: v2
+name: istio-tracing
+description: >
+  One mesh-wide Telemetry resource enabling both tracing (to Tempo) and
+  Prometheus metrics (istio_requests_total and friends) — mesh config alone
+  (istiod's extensionProviders) doesn't turn either on by itself. Tracing
+  and metrics deliberately live in the SAME Telemetry object, not two
+  separate ones: Istio only reads the first mesh-wide Telemetry resource
+  per namespace, silently ignoring any others (docs/incidents.md #14).
+type: application
+version: 0.1.0

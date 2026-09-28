@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-lxd-lab-home-01
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  source:
+    repoURL: git@github.com:manubalasree-homelab/sre-gitops-bootstrap.git
+    targetRevision: v1.54.0
+    path: charts/app-of-apps
+    helm:
+      valueFiles:
+        - ../../envs/lab/values.yaml
+      parameters:
+        - name: thisCluster
+          value: lxd-lab-home-01
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

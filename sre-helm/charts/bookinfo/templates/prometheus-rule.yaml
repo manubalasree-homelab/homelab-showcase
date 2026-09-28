@@ -1,0 +1,91 @@
+# Pre-computes p99 latency per bookinfo workload on Prometheus's own
+# evaluation schedule, instead of every dashboard/query re-running the full
+# histogram_quantile(rate(...)) math each time. `release: kube-prometheus-
+# stack` is required — Prometheus only discovers PrometheusRule objects
+# carrying that label (its own ruleSelector), same gotcha class as the
+# PodMonitor/ServiceMonitor label requirement in docs/incidents.md #14.
+#
+# The SLO groups below implement multi-window multi-burn-rate alerting
+# (Google SRE Workbook) for productpage's availability SLO. Windows are
+# NOT the textbook 5m/1h, 30m/6h, 6h/3d set — the 3-day tier's window was
+# shrunk to 48h/4h to fit this cluster's actual 2-day local Prometheus
+# retention (a rate() over a window longer than retention silently sees
+# less data than the window claims, not an error). The burn-rate
+# multiplier for that tier was recomputed to match (1.5x, not 1x) — see
+# docs/how-bookinfo-and-hpa-works.md or the blog material for the derivation.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bookinfo-rules
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: bookinfo.rules
+      rules:
+        - record: bookinfo:istio_request_duration_p99
+          expr: >-
+            histogram_quantile(0.99,
+              sum(rate(istio_request_duration_milliseconds_bucket{destination_workload_namespace="bookinfo", reporter="destination"}[5m]))
+              by (destination_workload, le)
+            )
+
+        # The customer-facing number, specifically — the rule above computes
+        # p99 for every workload in the namespace (details/reviews included),
+        # which is internal service-to-service latency, not what a customer
+        # ever perceives. productpage is the one entry point a customer
+        # actually calls; its own response time already includes everything
+        # it waited on internally, so this is the one number that actually
+        # represents what a customer felt end to end.
+        - record: bookinfo:productpage_p99
+          expr: >-
+            histogram_quantile(0.99,
+              sum(rate(istio_request_duration_milliseconds_bucket{destination_workload="productpage-v1", destination_workload_namespace="bookinfo", reporter="destination"}[5m]))
+              by (le)
+            )
+
+    - name: bookinfo.slo.recording
+      rules:
+        {{- range list "5m" "30m" "1h" "4h" "6h" "48h" }}
+        - record: bookinfo:productpage_availability_error_ratio:rate{{ . }}
+          expr: >-
+            sum(rate(istio_requests_total{destination_workload="productpage-v1", destination_workload_namespace="bookinfo", reporter="destination", response_code=~"5.."}[{{ . }}]))
+            /
+            sum(rate(istio_requests_total{destination_workload="productpage-v1", destination_workload_namespace="bookinfo", reporter="destination"}[{{ . }}]))
+        {{- end }}
+        # Headline burn rate for a dashboard — "how fast are we burning the
+        # error budget right now," the 1h window as a representative middle
+        # ground between the fast and slow alert tiers below.
+        - record: bookinfo:productpage_availability_burn_rate:rate1h
+          expr: >-
+            bookinfo:productpage_availability_error_ratio:rate1h / {{ .Values.slo.errorBudget }}
+
+    - name: bookinfo.slo.alerting
+      rules:
+        - alert: BookinfoProductpageSLOBurnRateFast
+          expr: >-
+            (bookinfo:productpage_availability_error_ratio:rate1h / {{ .Values.slo.errorBudget }} > 14.4)
+            and
+            (bookinfo:productpage_availability_error_ratio:rate5m / {{ .Values.slo.errorBudget }} > 14.4)
+          labels:
+            severity: critical
+          annotations:
+            summary: "productpage burning error budget 14.4x — would exhaust the 30-day budget in ~2 days at this rate"
+        - alert: BookinfoProductpageSLOBurnRateSlow
+          expr: >-
+            (bookinfo:productpage_availability_error_ratio:rate6h / {{ .Values.slo.errorBudget }} > 6)
+            and
+            (bookinfo:productpage_availability_error_ratio:rate30m / {{ .Values.slo.errorBudget }} > 6)
+          labels:
+            severity: critical
+          annotations:
+            summary: "productpage burning error budget 6x — would exhaust the 30-day budget in ~5 days at this rate"
+        - alert: BookinfoProductpageSLOBurnRateTicket
+          expr: >-
+            (bookinfo:productpage_availability_error_ratio:rate48h / {{ .Values.slo.errorBudget }} > 1.5)
+            and
+            (bookinfo:productpage_availability_error_ratio:rate4h / {{ .Values.slo.errorBudget }} > 1.5)
+          labels:
+            severity: warning
+          annotations:
+            summary: "productpage burning error budget 1.5x over 48h — worth investigating, not yet an emergency"

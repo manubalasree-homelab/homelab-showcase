@@ -1,0 +1,10 @@
+# Bounds versitygw disk usage for log chunks on this cluster's storage —
+# same reasoning as thanos.yaml's raw retention. delete_request_store must
+# name the object_store already configured in values/common/loki.yaml's
+# schemaConfig ("s3"); compactor won't start with retention_enabled without it.
+loki:
+  limits_config:
+    retention_period: 168h   # 1 week
+  compactor:
+    retention_enabled: true
+    delete_request_store: s3

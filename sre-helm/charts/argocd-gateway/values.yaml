@@ -1,0 +1,4 @@
+host: argocd.lab   # placeholder — pure-IP access, no DNS resolves this; only used as the TLS cert's CN/SAN
+certSecretName: argocd-gateway-cert
+backendService: argocd-server.argocd.svc.cluster.local
+backendPort: 80   # argocd-server's plain-HTTP port — server.insecure: true, TLS terminates here at the gateway instead

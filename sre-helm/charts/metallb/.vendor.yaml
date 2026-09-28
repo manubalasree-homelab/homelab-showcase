@@ -1,0 +1,3 @@
+chart: metallb
+repoURL: https://metallb.github.io/metallb
+version: 0.16.1

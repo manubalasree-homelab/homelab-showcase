@@ -1,0 +1,19 @@
+apiVersion: v2
+name: bookinfo
+description: >
+  Istio's own Bookinfo sample app (productpage -> details/reviews v1-v3/
+  ratings) — the platform's first genuinely multi-hop service graph, plus an
+  HPA on productpage (docs/incidents.md #21 has the full design reasoning).
+  Hand-written, not vendored via ADR-0011's .vendor.yaml mechanism: Istio
+  ships Bookinfo as plain upstream Kubernetes YAML
+  (istio/istio/samples/bookinfo at the release-1.30 branch, matching this
+  cluster's Istio version), not a Helm chart, so there's nothing to point a
+  .vendor.yaml at — the upstream manifests are copied in directly as
+  templates, same lightweight approach as istio-tracing/istio-monitors.
+  Includes the full canonical 3-manifest setup (bookinfo.yaml,
+  destination-rule-all.yaml, virtual-service-all-v1.yaml routing 100% to
+  reviews-v1), not just the bare Deployments — a partial Bookinfo missing
+  the destination rules a future reader would expect is a worse artifact
+  than the small extra cost of the complete standard setup.
+type: application
+version: 0.1.0

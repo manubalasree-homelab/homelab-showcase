@@ -1,0 +1,204 @@
+# Auto-loaded by Grafana's dashboard sidecar (grafana_dashboard label,
+# NAMESPACE=ALL is already set on that sidecar, so a ConfigMap here in
+# bookinfo — not monitoring — is discovered without any extra config).
+# Datasource is referenced by its fixed uid ("prometheus"), confirmed live
+# via Grafana's own /api/datasources rather than assumed from the chart.
+#
+# legendFormat's {{ "{{" }}label{{ "}}" }} syntax is Grafana's own template
+# syntax, not Helm's — has to be escaped exactly like this or Helm's Go
+# template engine tries to parse it as one of its own actions first and
+# fails with "function not defined".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bookinfo-grafana-dashboard
+  labels:
+    grafana_dashboard: "1"
+data:
+  bookinfo.json: |
+    {
+      "title": "Bookinfo",
+      "uid": "bookinfo",
+      "tags": ["bookinfo", "istio"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "time": { "from": "now-15m", "to": "now" },
+      "refresh": "30s",
+      "panels": [
+        {
+          "title": "p99 latency by workload (ms)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "bookinfo:istio_request_duration_p99",
+              "legendFormat": "{{ "{{" }}destination_workload{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "title": "Request rate by workload (req/s)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(istio_requests_total{destination_workload_namespace=\"bookinfo\", reporter=\"destination\"}[5m])) by (destination_workload)",
+              "legendFormat": "{{ "{{" }}destination_workload{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "title": "productpage HPA replicas",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"bookinfo\", horizontalpodautoscaler=\"productpage\"}",
+              "legendFormat": "current"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"bookinfo\", horizontalpodautoscaler=\"productpage\"}",
+              "legendFormat": "desired"
+            }
+          ]
+        },
+        {
+          "title": "SLO — productpage availability + latency",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 }
+        },
+        {
+          "title": "productpage p99 (customer-facing): SLO 140ms / SLA 200ms",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 17 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 140 },
+                  { "color": "red", "value": 200 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "bookinfo:productpage_p99"
+            }
+          ]
+        },
+        {
+          "title": "Current burn rate (1h)",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 17 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "orange", "value": 6 },
+                  { "color": "red", "value": 14.4 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "bookinfo:productpage_availability_burn_rate:rate1h"
+            }
+          ]
+        },
+        {
+          "title": "30-day availability: SLO 99.5% / SLA 99% (Thanos)",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 17 },
+          "datasource": { "type": "prometheus", "uid": "P5DCFC7561CCDE821" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 3,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 0.99 },
+                  { "color": "green", "value": 0.995 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "P5DCFC7561CCDE821" },
+              "expr": "1 - (sum(increase(istio_requests_total{destination_workload=\"productpage-v1\", destination_workload_namespace=\"bookinfo\", reporter=\"destination\", response_code=~\"5..\"}[30d])) / sum(increase(istio_requests_total{destination_workload=\"productpage-v1\", destination_workload_namespace=\"bookinfo\", reporter=\"destination\"}[30d])))"
+            }
+          ]
+        },
+        {
+          "title": "Burn rate over time (thresholds: 1 / 6 / 14.4)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": { "thresholdsStyle": { "mode": "dashed" } },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "orange", "value": 6 },
+                  { "color": "red", "value": 14.4 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "bookinfo:productpage_availability_burn_rate:rate1h",
+              "legendFormat": "burn rate (1h)"
+            }
+          ]
+        },
+        {
+          "title": "Error ratio by window",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+          "targets": [
+            { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "bookinfo:productpage_availability_error_ratio:rate5m", "legendFormat": "5m" },
+            { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "bookinfo:productpage_availability_error_ratio:rate30m", "legendFormat": "30m" },
+            { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "bookinfo:productpage_availability_error_ratio:rate1h", "legendFormat": "1h" },
+            { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "bookinfo:productpage_availability_error_ratio:rate4h", "legendFormat": "4h" },
+            { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "bookinfo:productpage_availability_error_ratio:rate6h", "legendFormat": "6h" },
+            { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "bookinfo:productpage_availability_error_ratio:rate48h", "legendFormat": "48h" }
+          ]
+        }
+      ]
+    }

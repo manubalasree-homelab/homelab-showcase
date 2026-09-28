@@ -1,0 +1,5 @@
+apiVersion: v2
+name: hello
+description: Minimal Deployment + Service, the v0.1 proof-of-life Component
+type: application
+version: 0.1.0

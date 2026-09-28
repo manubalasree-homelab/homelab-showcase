@@ -1,0 +1,5 @@
+apiVersion: v2
+name: metallb-config
+description: IPAddressPool + L2Advertisement CRs for MetalLB — separate from the metallb chart since its CRDs must exist first (sync-wave ordered after it)
+type: application
+version: 0.1.0

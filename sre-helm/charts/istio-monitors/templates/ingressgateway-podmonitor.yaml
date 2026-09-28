@@ -1,0 +1,19 @@
+# kube-prometheus-stack's Prometheus only discovers PodMonitors/ServiceMonitors
+# carrying `release: kube-prometheus-stack` (its own selector, not a project
+# convention) — see docs/incidents.md, this is the same class of silent-miss
+# gotcha as the manual-sync syncOptions one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: istio-ingressgateway
+  namespace: istio-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: istio-ingressgateway
+  podMetricsEndpoints:
+    - port: http-envoy-prom   # containerPort 15090, Envoy's own /stats/prometheus
+      path: /stats/prometheus
+      interval: 30s

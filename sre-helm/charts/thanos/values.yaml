@@ -1,0 +1,39 @@
+image:
+  repository: quay.io/thanos/thanos
+  tag: v0.39.2
+
+# The Secret containing objstore.yml (versitygw S3 config) — same Secret the
+# kube-prometheus-stack Prometheus's Thanos sidecar uses, hand-applied, never
+# committed (see docs/incidents.md #13).
+objstoreSecretName: thanos-objstore-config
+
+# Static addresses, not DNS-SRV discovery — this homelab has exactly one
+# Prometheus (with its Thanos sidecar) and one Store Gateway, so there's
+# nothing to discover.
+query:
+  stores:
+    - prometheus-operated.monitoring.svc.cluster.local:10901
+    - thanos-storegateway.monitoring.svc.cluster.local:10901
+
+# How long the Compactor keeps blocks in versitygw before deleting them.
+# No opinion baked in here — this is cluster-specific policy (tied to a
+# particular cluster's disk constraints), not a universal chart default, so
+# it belongs in values/clusters/<cluster>/thanos.yaml, not here. Leaving
+# compactor.retention.raw unset means Thanos's own default applies: 0s,
+# never delete.
+#
+# Only raw (full-resolution) retention is safely overridable to something
+# short at all: Thanos hard-enforces --retention.resolution-5m >= 10d (the
+# minimum block age before 1h downsampling can happen — a shorter 5m
+# retention would delete blocks before they're ever eligible to become 1h
+# blocks, so Thanos refuses to start rather than silently break the
+# downsampling chain). Confirmed live — don't override fiveMinutes/oneHour
+# below 10d.
+compactor:
+  retention: {}
+
+# No resource requests anywhere in this chart, deliberately — this
+# cluster's nodes are already tight (see docs/incidents.md #12's node2
+# capacity note). A request that doesn't fit blocks scheduling outright
+# (as it did for Loki's memcached caches); omitting requests lets the
+# scheduler place these BestEffort instead of failing closed.

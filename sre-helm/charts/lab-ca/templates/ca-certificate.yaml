@@ -1,0 +1,16 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lab-ca-root
+  namespace: {{ .Values.namespace }}
+spec:
+  isCA: true
+  commonName: {{ .Values.commonName }}
+  secretName: {{ .Values.caSecretName }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: lab-ca-bootstrap
+    kind: Issuer
+    group: cert-manager.io

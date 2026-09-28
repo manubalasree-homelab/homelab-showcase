@@ -1,0 +1,15 @@
+auth:
+  strategy: anonymous   # homelab, no SSO (explicit non-goal) — matches ArgoCD's own simple-auth posture
+
+deployment:
+  namespace: istio-system   # same namespace as istiod, standard convention
+
+external_services:
+  prometheus:
+    url: "http://kube-prometheus-stack-prometheus.monitoring:9090"
+  grafana:
+    enabled: true
+    internal_url: "http://kube-prometheus-stack-grafana.monitoring:80"   # Kiali's own backend calls (dashboard data)
+    external_url: "https://grafana.lab"                                  # links shown to the browser
+  custom_dashboards:
+    enabled: true

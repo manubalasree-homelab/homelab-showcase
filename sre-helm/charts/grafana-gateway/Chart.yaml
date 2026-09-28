@@ -1,0 +1,5 @@
+apiVersion: v2
+name: grafana-gateway
+description: Istio Gateway + VirtualService routing Grafana through the ingress gateway, TLS via lab-ca
+type: application
+version: 0.1.0

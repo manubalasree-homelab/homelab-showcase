@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: versitygw
+  namespace: istio-system
+spec:
+  hosts:
+    - {{ .Values.host }}
+  gateways:
+    - versitygw-gateway
+  http:
+    - route:
+        - destination:
+            host: {{ .Values.backendService }}
+            port:
+              number: {{ .Values.backendPort }}

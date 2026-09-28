@@ -1,0 +1,14 @@
+apiVersion: v2
+name: istio-injection
+description: >
+  Labels every namespace holding a workload this repo manages with
+  istio.io/rev: default, enabling sidecar injection — ADR-0013 (superseding
+  ADR-0012's gateway-routed-only scope). Excludes only what a hard
+  technical/ownership constraint rules out: hostNetwork pods (metallb-system,
+  node-exporter), cert-manager (webhook bootstrap-ordering risk), and every
+  kube-system/cattle-*/fleet-*/rancher namespace (not ours to modify). A
+  workload sharing an included namespace without being safe to inject opts
+  out individually via a sidecar.istio.io/inject: "false" pod annotation in
+  its own chart values, not here.
+type: application
+version: 0.1.0

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: istio-monitors
+description: >
+  PodMonitor for istio-ingressgateway's Envoy/pilot-agent stats, a second
+  PodMonitor for every sidecar-injected pod's own Envoy stats (matched via
+  the security.istio.io/tlsMode: istio label every injected pod carries
+  automatically — added after the ADR-0012/0013 injection rollout outgrew
+  the original gateway-only PodMonitor), and a ServiceMonitor for Kiali's
+  own metrics — wires all three into kube-prometheus-stack's Prometheus.
+  Does NOT cover Istio's higher-level
+  istio_requests_total-style request metrics: istiod in this install (vendored
+  as bare base/istiod/gateway charts, not a full istioctl profile install)
+  never synthesizes the native istio.stats HTTP filter on any proxy, sidecar
+  or gateway — confirmed by direct inspection, not assumed. See
+  docs/incidents.md for the investigation. What's scraped here is real and
+  useful (connection/cluster health, TLS, resource usage, Kiali's own
+  request/cache stats) but won't populate Kiali's traffic graph, which needs
+  that missing filter.
+type: application
+version: 0.1.0

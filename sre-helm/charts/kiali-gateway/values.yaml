@@ -1,0 +1,4 @@
+host: kiali.lab   # placeholder — pure-IP access via /etc/hosts, same pattern as argocd.lab / versitygw.lab
+certSecretName: kiali-gateway-cert
+backendService: kiali.istio-system.svc.cluster.local
+backendPort: 20001

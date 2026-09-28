@@ -1,0 +1,12 @@
+{{- range .Values.namespaces }}
+---
+# Declares only the istio.io/rev label — ServerSideApply=true (global
+# syncOption) merges this onto the existing Namespace object by field
+# ownership, it doesn't overwrite other labels already there.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ . }}
+  labels:
+    istio.io/rev: default
+{{- end }}

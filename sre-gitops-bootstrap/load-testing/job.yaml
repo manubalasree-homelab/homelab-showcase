@@ -1,0 +1,61 @@
+# Not an ArgoCD Component, deliberately — this is a test action you run on
+# demand, not a persistent service (docs/incidents.md #21). Apply it when
+# you want to run the demo, delete it when you're done:
+#
+#   kubectl create namespace bookinfo-load-test --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f load-testing/job.yaml
+#   kubectl logs -n bookinfo-load-test -f job/bookinfo-load-test
+#   kubectl delete -f load-testing/job.yaml   # cleanup, or just re-apply to run again
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bookinfo-load-test-script
+  namespace: bookinfo-load-test
+data:
+  bookinfo-load-test.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+
+    const TARGET = __ENV.TARGET || 'http://productpage.bookinfo.svc.cluster.local:9080';
+
+    export const options = {
+      stages: [
+        { duration: '30s', target: 50 },
+        { duration: '2m', target: 50 },
+        { duration: '30s', target: 0 },
+      ],
+    };
+
+    export default function () {
+      const res = http.get(`${TARGET}/productpage`);
+      check(res, { 'status is 200': (r) => r.status === 200 });
+      sleep(0.1);
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bookinfo-load-test
+  namespace: bookinfo-load-test
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"   # a load generator isn't a mesh service; keep it out
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          args: ["run", "/scripts/bookinfo-load-test.js"]
+          env:
+            - name: TARGET
+              value: http://productpage.bookinfo.svc.cluster.local:9080
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: bookinfo-load-test-script

@@ -1,0 +1,17 @@
+auth:
+  existingSecret: versitygw-root
+
+tls:
+  enabled: false   # Istio's gateway is now the sole TLS terminator — see charts/versitygw-gateway (matches argocd's server.insecure pattern)
+
+certificate:
+  create: false
+
+webui:
+  enabled: true
+  # The chart's own auto-detected endpoint uses internal pod IPs, which don't
+  # work from outside the cluster (port-forward). Pin it to match the port
+  # you'll actually forward to — see docs/how-the-bootstrap-works.md.
+  # http, not https: tls.enabled: false now (Istio terminates TLS instead).
+  apiGateways:
+    - http://localhost:7070

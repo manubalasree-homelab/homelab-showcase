@@ -1,0 +1,41 @@
+productpage:
+  # Deliberately small, not a real sizing estimate — productpage is a
+  # lightweight Flask app doing mostly network I/O to details/reviews/
+  # ratings, not CPU-bound work the way a real sizing exercise would target.
+  # HPA's percentage is relative to this request value, not an absolute
+  # number, so even modest real CPU usage under load reads as a high
+  # utilization percentage and triggers scaling reliably. docs/incidents.md
+  # #21 has the full reasoning for why this isn't "200m" like the classic
+  # php-apache HPA tutorial uses.
+  cpuRequest: 20m
+
+hpa:
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 50
+
+slo:
+  # Availability SLO for productpage — the single user-facing entry point.
+  # Deliberately tighter than the assumed 99% SLA: this is the internal
+  # target alerts fire against, so a real incident trips these well before
+  # the external SLA is actually breached, not at the same instant as it.
+  # The burn-rate *multipliers* below (14.4/6/1.5) don't change with this
+  # value — only the absolute error rate they correspond to does, since
+  # burn rate is defined relative to the budget, not an absolute number.
+  availabilityTarget: 0.995
+  # 1 - availabilityTarget. Kept as its own explicit value rather than
+  # computed in the template — burn-rate math depends on this being exactly
+  # right, not on Helm's float arithmetic; if availabilityTarget changes,
+  # update this too.
+  errorBudget: 0.005
+
+  # Latency SLA/SLO — direct p99 thresholds in ms, not a good/bad ratio
+  # like availability above. Same "SLO tighter than the external SLA"
+  # reasoning: 140ms is the internal target alerts/dashboard color against;
+  # 200ms is the assumed external promise, only breached if the SLO's
+  # already been missed for a while. No burn-rate alerting on this yet —
+  # dashboard visualization only, added on request; extending to full
+  # multi-window burn-rate alerting (matching availability) is a natural
+  # next step, not done here.
+  latencySLOMs: 140
+  latencySLAMs: 200

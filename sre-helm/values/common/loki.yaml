@@ -1,0 +1,82 @@
+# Monolithic mode (single process, all Loki components) — matches this
+# homelab's scale, same "don't run microservices you don't need" choice as
+# Tempo. Backed by versitygw's S3 API, same pattern as Tempo: extraEnvFrom a
+# secretRef + expand-env for env-var-substituted credentials rather than
+# literal values in git.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false   # single-tenant homelab — no multi-tenant auth needed
+
+  commonConfig:
+    replication_factor: 1   # single binary replica — no point replicating to itself
+
+  storage:
+    type: s3
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-chunks
+      admin: loki-chunks
+    s3:
+      endpoint: versitygw.versitygw.svc.cluster.local:7070
+      region: us-east-1
+      accessKeyId: "${LOKI_S3_ACCESS_KEY}"
+      secretAccessKey: "${LOKI_S3_SECRET_KEY}"
+      s3ForcePathStyle: true
+      insecure: true
+
+  schemaConfig:
+    configs:
+      - from: "2026-01-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+singleBinary:
+  replicas: 1
+  extraArgs:
+    - "-config.expand-env=true"
+  extraEnvFrom:
+    - secretRef:
+        name: loki-s3-credentials
+
+# Disable the other deployment-mode targets (SimpleScalable/microservices) —
+# SingleBinary mode runs everything in the singleBinary StatefulSet instead.
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+
+# No embedded MinIO — versitygw is this homelab's one S3 endpoint (ADR-0009).
+minio:
+  enabled: false
+
+# No nginx gateway in front — nothing outside the cluster talks to Loki
+# directly; Vector and Grafana both reach the singleBinary Service.
+gateway:
+  enabled: false
+
+# No memcached chunks/results caches — real memory pressure on this
+# cluster's nodes (already 55-76% used before Loki), and these are pure
+# perf optimizations Loki runs fine without at homelab log volume.
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+
+# No synthetic canary/self-monitoring — extra moving parts this homelab
+# doesn't need.
+lokiCanary:
+  enabled: false
+monitoring:
+  selfMonitoring:
+    enabled: false
+  lokiCanary:
+    enabled: false
+test:
+  enabled: false

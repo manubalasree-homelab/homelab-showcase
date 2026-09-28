@@ -1,0 +1,16 @@
+# Every namespace holding a workload this repo manages, except where a hard
+# technical/ownership constraint rules it out (ADR-0013, superseding
+# ADR-0012's gateway-routed-only scope): metallb-system and node-exporter
+# (hostNetwork pods can't be sidecar-injected), cert-manager (cluster-
+# critical webhook, bootstrap-ordering risk), and every kube-system/
+# cattle-*/fleet-*/rancher namespace (not ours to modify).
+namespaces:
+  - argocd
+  - versitygw
+  - istio-system # kiali; istiod/istio-ingressgateway self-exclude via sidecar.istio.io/inject: "false" on their own pods
+  - monitoring   # node-exporter self-excludes (hostNetwork); everything else here now gets a sidecar
+  - hello
+  - loki
+  - tempo
+  - vector
+  - bookinfo

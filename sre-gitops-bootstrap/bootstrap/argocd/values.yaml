@@ -1,0 +1,6 @@
+# One-time hand-run bootstrap values: helm install argocd argo/argo-cd -f bootstrap/argocd/values.yaml -n argocd --create-namespace
+# Same chart/version/release-name/namespace as the `argocd` entry in envs/lab/values.yaml, so the
+# Application created by the root adopts this release instead of creating a second one (ADR-0002, Q13/Q15).
+server:
+  service:
+    type: ClusterIP

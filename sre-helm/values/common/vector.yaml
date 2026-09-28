@@ -1,0 +1,55 @@
+# Agent role = DaemonSet, one Vector per node, tailing container logs and
+# shipping them to Loki. RBAC (pod/namespace read) is auto-created by the
+# chart for this role.
+role: "Agent"
+
+# customConfig replaces the chart's default Agent config wholesale (the
+# chart requires **all** options once this is set) — based directly on the
+# chart's own default agent.yaml (see charts/vector/templates/configmap.yaml),
+# with the `stdout` sink swapped for a `loki` sink pointed at the
+# in-cluster Loki Service.
+#
+# The `{{ "{{ ... }}" }}` wrapping below is Helm's escape idiom: this whole
+# block is re-serialized to YAML and passed through `tpl`, so a literal
+# `{{ kubernetes.pod_namespace }}` has to survive Helm's own templating
+# untouched to reach Vector's VRL-style label templating at runtime.
+customConfig:
+  data_dir: /vector-data-dir
+  api:
+    enabled: true
+    address: 0.0.0.0:8686
+  sources:
+    kubernetes_logs:
+      type: kubernetes_logs
+      # Default is "beginning" — on first boot that replays every pod's
+      # entire on-disk log history in one burst, which both blows through
+      # Loki's default ingestion-rate limit (429s) and gets rejected outright
+      # for entries older than Loki's acceptance window ("entry too far
+      # behind", 400s). Only tail new lines going forward instead.
+      read_from: "end"
+    host_metrics:
+      filesystem:
+        devices:
+          excludes: [binfmt_misc]
+        filesystems:
+          excludes: [binfmt_misc]
+        mountpoints:
+          excludes: ["*/proc/sys/fs/binfmt_misc"]
+      type: host_metrics
+    internal_metrics:
+      type: internal_metrics
+  sinks:
+    loki:
+      type: loki
+      inputs: [kubernetes_logs]
+      endpoint: http://loki.loki.svc.cluster.local:3100
+      encoding:
+        codec: json
+      labels:
+        namespace: '{{ "{{ kubernetes.pod_namespace }}" }}'
+        pod: '{{ "{{ kubernetes.pod_name }}" }}'
+        container: '{{ "{{ kubernetes.container_name }}" }}'
+    prom_exporter:
+      type: prometheus_exporter
+      inputs: [host_metrics, internal_metrics]
+      address: 0.0.0.0:9090

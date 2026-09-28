@@ -1,0 +1,8 @@
+repoURL: oci://ghcr.io/versity/versitygw/charts/versitygw
+chart: versitygw
+version: "0.4.4"
+# NOTE: this chart carries a local patch (readiness-probe TLS scheme fix,
+# ADR-0010) on top of the vendored version — the update-check script must
+# re-apply templates/deployment.yaml's patch after any version bump, not
+# silently overwrite it. See docs/how-the-bootstrap-works.md.
+patched: true

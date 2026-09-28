@@ -1,0 +1,459 @@
+{{- $gatewayLogLevel := default "silent" .Values.gateway.logLevel -}}
+{{- $iamServer := .Values.iamServer | default dict -}}
+{{- $iamServerEnabled := $iamServer.enabled | default false -}}
+{{- $iamServerPrivate := $iamServer.private | default dict -}}
+{{- $iamServerPrivateEnabled := $iamServerPrivate.enabled | default false -}}
+{{- $iamServerAuth := $iamServer.auth | default dict -}}
+{{- $iamStandalone := .Values.iam.standalone | default dict -}}
+{{- $iamStandaloneEndpoint := $iamStandalone.endpoint | default "" -}}
+{{- $iamStandaloneCredentials := $iamStandalone.credentials | default dict -}}
+{{- $internalIAM := and .Values.iam.enabled (eq .Values.iam.type "internal") -}}
+{{- $iamDir := clean (.Values.iam.dir | default "/mnt/iam") -}}
+{{- $iamPersistence := .Values.iam.persistence | default dict -}}
+{{- $sidecarDir := .Values.gateway.backend.sidecarDir -}}
+{{- $versioningDir := .Values.gateway.backend.versioningDir -}}
+{{- $adminPathPrefix := .Values.admin.pathPrefix | default "" -}}
+{{- $webuiS3Prefix := .Values.webui.s3Prefix | default "" -}}
+{{- /* Safety check: multiple replicas with local state must have persistence enabled */}}
+{{- if and (gt (int .Values.replicaCount) 1) .Values.iam.enabled (eq .Values.iam.type "internal") }}
+  {{- fail "replicaCount > 1 cannot use iam.type=internal because the file store does not coordinate concurrent writers; use standalone or another external IAM backend" }}
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) (not .Values.persistence.enabled) }}
+  {{- if eq .Values.gateway.backend.type "posix" }}
+    {{- fail "Multiple replicas with a POSIX backend require persistence.enabled=true. If using a stateless backend (e.g. S3 or Azure) and external IAM, persistence can be disabled." }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.persistence.enabled (not .Values.persistence.create) (not .Values.persistence.claimName) (not .Values.persistence.hostPath) }}
+  {{- fail "persistence.claimName or persistence.hostPath is required when persistence.create is false" }}
+{{- end }}
+{{- if and .Values.persistence.claimName .Values.persistence.hostPath }}
+  {{- fail "only persistence.claimName or persistence.hostPath can be set" }}
+{{- end }}
+{{- if and .Values.persistence.create .Values.persistence.hostPath }}
+  {{- fail "persistence.create must be false for persistence.hostPath can be set" }}
+{{- end }}
+{{- if and .Values.gateway.backend.sidecarDir (ne .Values.gateway.backend.type "posix") }}
+  {{- fail "gateway.backend.sidecarDir is only supported with the posix backend" }}
+{{- end }}
+{{- if and .Values.gateway.backend.versioningDir (not (or (eq .Values.gateway.backend.type "posix") (eq .Values.gateway.backend.type "scoutfs"))) }}
+  {{- fail "gateway.backend.versioningDir is only supported with the posix and scoutfs backends" }}
+{{- end }}
+{{- /* Bucket deletion removes <dir>/<bucket> in these directories, so nesting one in another loses data */}}
+{{- if and $sidecarDir (include "versitygw.pathsOverlap" (list $sidecarDir "/mnt/data")) }}
+  {{- fail "gateway.backend.sidecarDir must not overlap the backend data mount /mnt/data" }}
+{{- end }}
+{{- if and $versioningDir (include "versitygw.pathsOverlap" (list $versioningDir "/mnt/data")) }}
+  {{- fail "gateway.backend.versioningDir must not overlap the backend data mount /mnt/data" }}
+{{- end }}
+{{- if and $sidecarDir $versioningDir (include "versitygw.pathsOverlap" (list $sidecarDir $versioningDir)) }}
+  {{- fail "gateway.backend.sidecarDir and gateway.backend.versioningDir must not overlap" }}
+{{- end }}
+{{- if not (or (eq $gatewayLogLevel "silent") (eq $gatewayLogLevel "debug") (eq $gatewayLogLevel "unsafe")) }}
+  {{- fail "gateway.logLevel must be one of silent, debug, or unsafe" }}
+{{- end }}
+{{- if and $adminPathPrefix (or (not (regexMatch "^/[A-Za-z0-9._~-]+$" $adminPathPrefix)) (eq $adminPathPrefix "/.") (eq $adminPathPrefix "/..")) }}
+  {{- fail "admin.pathPrefix must be \"/\" followed by a single segment of letters, digits, '-', '.', '_' or '~', other than '.' or '..' (e.g. /admin)" }}
+{{- end }}
+{{- range $key, $prefix := dict "webui.pathPrefix" .Values.webui.pathPrefix "webui.s3Prefix" $webuiS3Prefix }}
+{{- if and $prefix (not (regexMatch "^/[^/?#\\\\[:space:]]+$" $prefix)) }}
+  {{- fail (printf "%s must be \"/\" followed by a single path segment (e.g. /ui)" $key) }}
+{{- end }}
+{{- end }}
+{{- if and (not .Values.admin.enabled) $adminPathPrefix (eq (lower $adminPathPrefix) (lower $webuiS3Prefix)) }}
+  {{- fail "admin.pathPrefix must differ from webui.s3Prefix when the admin API is served on the S3 port (admin.enabled=false)" }}
+{{- end }}
+{{- if $internalIAM }}
+{{- $iamOverlap := not (isAbs $iamDir) }}
+{{- range compact (list "/mnt/data" $sidecarDir $versioningDir) }}
+{{- if include "versitygw.pathsOverlap" (list $iamDir .) }}
+{{- $iamOverlap = true }}
+{{- end }}
+{{- end }}
+{{- if $iamOverlap }}
+  {{- fail "iam.dir must be an absolute path that does not overlap /mnt/data, gateway.backend.sidecarDir or gateway.backend.versioningDir" }}
+{{- end }}
+{{- end }}
+{{- if and $internalIAM $iamPersistence.enabled (not (dig "create" true $iamPersistence)) (not $iamPersistence.claimName) }}
+  {{- fail "iam.persistence.claimName is required when iam.persistence.create is false" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (not .Values.iam.standalone.endpoint) (not $iamServerEnabled) }}
+  {{- fail "iam.type=standalone requires either iam.standalone.endpoint or iamServer.enabled=true" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (not .Values.iam.standalone.endpoint) $iamServerEnabled (not $iamServerPrivateEnabled) }}
+  {{- fail "in-chart standalone IAM requires iamServer.private.enabled=true; otherwise set iam.standalone.endpoint explicitly" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") $iamStandaloneEndpoint (not (regexMatch "^(\\[[0-9A-Fa-f:]+\\]|[^/:[:space:]]+):[0-9]+$" $iamStandaloneEndpoint)) }}
+  {{- fail "iam.standalone.endpoint must be a host:port TCP address; the chart does not provide a shared volume for Unix sockets" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (not (or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret)) }}
+  {{- fail "a standalone IAM TCP endpoint requires iam.standalone.certificate.create=true or iam.standalone.certificate.existingSecret" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") .Values.iam.standalone.certificate.create (not .Values.iam.standalone.certificate.existingSecret) (not .Values.iam.standalone.certificate.issuerRef.name) }}
+  {{- fail "iam.standalone.certificate.issuerRef.name is required when creating the IAM client certificate" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (or (and .Values.iam.standalone.access (not .Values.iam.standalone.secret)) (and .Values.iam.standalone.secret (not .Values.iam.standalone.access))) }}
+  {{- fail "iam.standalone.access and iam.standalone.secret must be set together, or both left empty to use the root credentials" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") $iamStandaloneCredentials.existingSecret (or .Values.iam.standalone.access .Values.iam.standalone.secret) }}
+  {{- fail "iam.standalone.credentials.existingSecret cannot be combined with literal iam.standalone.access/secret values" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") $iamStandaloneCredentials.existingSecret (or (not $iamStandaloneCredentials.accessKeyKey) (not $iamStandaloneCredentials.secretKeyKey)) }}
+  {{- fail "iam.standalone.credentials.accessKeyKey and secretKeyKey are required when credentials.existingSecret is set" }}
+{{- end }}
+{{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (not .Values.iam.standalone.endpoint) $iamServerAuth.existingSecret (not $iamStandaloneCredentials.existingSecret) (not .Values.iam.standalone.access) }}
+  {{- fail "in-chart IAM with iamServer.auth.existingSecret requires iam.standalone.credentials.existingSecret (normally the same Secret)" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "versitygw.fullname" . }}
+  labels:
+    {{- include "versitygw.labels" . | nindent 4 }}
+  {{- with .Values.deploymentAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "versitygw.selectorLabels" . | nindent 6 }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      annotations:
+        {{- if not .Values.auth.existingSecret }}
+        checksum/credentials: {{ cat .Release.Name .Values.auth.accessKey .Values.auth.secretKey | sha256sum | trunc 12 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "versitygw.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "versitygw.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # Backend selection — consumed by docker-entrypoint.sh
+            - name: VGW_BACKEND
+              value: {{ .Values.gateway.backend.type | quote }}
+            - name: VGW_BACKEND_ARGS
+              value: {{ .Values.gateway.backend.args | quote }}
+            {{- if .Values.gateway.backend.sidecarDir }}
+            - name: VGW_META_SIDECAR
+              value: {{ .Values.gateway.backend.sidecarDir | quote }}
+            {{- end }}
+            {{- if .Values.gateway.backend.versioningDir }}
+            - name: VGW_VERSIONING_DIR
+              value: {{ .Values.gateway.backend.versioningDir | quote }}
+            {{- end }}
+            # Root credentials — sourced from a Kubernetes Secret
+            - name: ROOT_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "versitygw.credentialsSecretName" . }}
+                  key: rootAccessKeyId
+            - name: ROOT_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "versitygw.credentialsSecretName" . }}
+                  key: rootSecretAccessKey
+            # Gateway server settings
+            - name: VGW_PORT
+              value: ":{{ .Values.gateway.port }}"
+            - name: VGW_REGION
+              value: {{ .Values.gateway.region | quote }}
+            - name: VGW_HEALTH
+              value: "/_/health"
+            {{- if .Values.gateway.virtualDomain }}
+            - name: VGW_VIRTUAL_DOMAIN
+              value: {{ .Values.gateway.virtualDomain | quote }}
+            {{- end }}
+            {{- if .Values.gateway.readOnly }}
+            - name: VGW_READ_ONLY
+              value: "true"
+            {{- end }}
+            {{- if .Values.gateway.quiet }}
+            - name: VGW_QUIET
+              value: "true"
+            {{- end }}
+            {{- if ne $gatewayLogLevel "silent" }}
+            - name: VGW_LOG_LEVEL
+              value: {{ $gatewayLogLevel | quote }}
+            {{- else if .Values.gateway.debug }}
+            - name: VGW_LOG_LEVEL
+              value: "debug"
+            {{- end }}
+            {{- if .Values.gateway.accessLog }}
+            - name: VGW_ACCESS_LOG
+              value: {{ .Values.gateway.accessLog | quote }}
+            {{- end }}
+            {{- if .Values.gateway.corsAllowOrigin }}
+            - name: VGW_CORS_ALLOW_ORIGIN
+              value: {{ .Values.gateway.corsAllowOrigin | quote }}
+            {{- end }}
+            {{- if .Values.gateway.disableStrictBucketNames }}
+            - name: VGW_DISABLE_STRICT_BUCKET_NAMES
+              value: "true"
+            {{- end }}
+            # Admin API server
+            {{- if .Values.admin.enabled }}
+            - name: VGW_ADMIN_PORT
+              value: ":{{ .Values.admin.port }}"
+            - name: VGW_ADMIN_MAX_CONNECTIONS
+              value: {{ .Values.admin.maxConnections | quote }}
+            - name: VGW_ADMIN_MAX_REQUESTS
+              value: {{ .Values.admin.maxRequests | quote }}
+            {{- end }}
+            {{- if $adminPathPrefix }}
+            - name: VGW_ADMIN_PATH_PREFIX
+              value: {{ $adminPathPrefix | quote }}
+            {{- end }}
+            # WebUI
+            {{- if .Values.webui.enabled }}
+            - name: VGW_WEBUI_PORT
+              value: ":{{ .Values.webui.port }}"
+            {{- if .Values.webui.noTls }}
+            - name: VGW_WEBUI_NO_TLS
+              value: "true"
+            {{- end }}
+            {{- if .Values.webui.pathPrefix }}
+            - name: VGW_WEBUI_PATH_PREFIX
+              value: {{ .Values.webui.pathPrefix | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if $webuiS3Prefix }}
+            - name: VGW_WEBUI_S3_PREFIX
+              value: {{ $webuiS3Prefix | quote }}
+            {{- end }}
+            {{- if or .Values.webui.enabled $webuiS3Prefix }}
+            {{- if .Values.webui.apiGateways }}
+            - name: VGW_WEBUI_GATEWAYS
+              value: {{ .Values.webui.apiGateways | join "," | quote }}
+            {{- end }}
+            {{- if .Values.webui.adminGateways }}
+            - name: VGW_WEBUI_ADMIN_GATEWAYS
+              value: {{ .Values.webui.adminGateways | join "," | quote }}
+            {{- end }}
+            {{- if .Values.webui.iamGateways }}
+            - name: VGW_WEBUI_IAM_GATEWAYS
+              value: {{ .Values.webui.iamGateways | join "," | quote }}
+            {{- end }}
+            {{- end }}
+            # Website Hosting
+            {{- if .Values.website.enabled }}
+            - name: VGW_WEBSITE_PORT
+              value: ":{{ .Values.website.port }}"
+            - name: VGW_WEBSITE_DOMAIN
+              value: {{ .Values.website.domain | quote }}
+            {{- if .Values.website.noTls }}
+            - name: VGW_WEBSITE_NO_TLS
+              value: "true"
+            {{- end }}
+            {{- end }}
+            {{- if .Values.iam.enabled }}
+            # IAM settings
+            {{- if eq .Values.iam.type "internal" }}
+            - name: VGW_IAM_DIR
+              value: {{ $iamDir | quote }}
+            {{- else if eq .Values.iam.type "standalone" }}
+            - name: VGW_IAM_STANDALONE_ENDPOINT
+              value: {{ include "versitygw.standaloneIAMEndpoint" . | quote }}
+            {{- if $iamStandaloneCredentials.existingSecret }}
+            - name: VGW_IAM_STANDALONE_ACCESS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $iamStandaloneCredentials.existingSecret }}
+                  key: {{ $iamStandaloneCredentials.accessKeyKey }}
+            - name: VGW_IAM_STANDALONE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $iamStandaloneCredentials.existingSecret }}
+                  key: {{ $iamStandaloneCredentials.secretKeyKey }}
+            {{- else }}
+            {{- if .Values.iam.standalone.access }}
+            - name: VGW_IAM_STANDALONE_ACCESS
+              value: {{ .Values.iam.standalone.access | quote }}
+            {{- end }}
+            {{- if .Values.iam.standalone.secret }}
+            - name: VGW_IAM_STANDALONE_SECRET
+              value: {{ .Values.iam.standalone.secret | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret }}
+            - name: VGW_IAM_STANDALONE_CLIENT_CERT
+              value: /iam-client-certs/tls.crt
+            - name: VGW_IAM_STANDALONE_CLIENT_CERT_KEY
+              value: /iam-client-certs/tls.key
+            - name: VGW_IAM_STANDALONE_SERVER_CA
+              value: /iam-client-certs/ca.crt
+            {{- end }}
+            - name: VGW_IAM_STANDALONE_DEFAULT_UID
+              value: {{ .Values.iam.standalone.defaultUid | quote }}
+            - name: VGW_IAM_STANDALONE_DEFAULT_GID
+              value: {{ .Values.iam.standalone.defaultGid | quote }}
+            - name: VGW_IAM_STANDALONE_DEFAULT_PROJECT_ID
+              value: {{ .Values.iam.standalone.defaultProjectId | quote }}
+            {{- end }}
+            {{- if .Values.iam.cacheDisable }}
+            - name: VGW_IAM_CACHE_DISABLE
+              value: "true"
+            {{- end }}
+            - name: VGW_IAM_CACHE_TTL
+              value: {{ .Values.iam.cacheTtl | quote }}
+            - name: VGW_IAM_CACHE_PRUNE
+              value: {{ .Values.iam.cachePrune | quote }}
+            {{- if .Values.iam.debug }}
+            - name: VGW_IAM_DEBUG
+              value: "true"
+            {{- end }}
+            {{- end }}
+            # TLS
+            {{- if .Values.tls.enabled }}
+            - name: VGW_CERT
+              value: /certs/tls.crt
+            - name: VGW_KEY
+              value: /certs/tls.key
+            {{- end }}
+            # Extra user-provided environment variables
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: s3-api
+              containerPort: {{ .Values.gateway.port }}
+              protocol: TCP
+            {{- if .Values.admin.enabled }}
+            - name: admin
+              containerPort: {{ .Values.admin.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.webui.enabled }}
+            - name: webui
+              containerPort: {{ .Values.webui.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.website.enabled }}
+            - name: website
+              containerPort: {{ .Values.website.port }}
+              protocol: TCP
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: "/_/health"
+              port: s3-api
+              {{- if .Values.tls.enabled }}
+              scheme: HTTPS
+              {{- end }}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+              subPath: data
+              readOnly: false
+            {{- if .Values.gateway.backend.sidecarDir }}
+            - name: data
+              mountPath: {{ .Values.gateway.backend.sidecarDir }}
+              subPath: metadata
+              readOnly: false
+            {{- end }}
+            {{- if .Values.gateway.backend.versioningDir }}
+            - name: data
+              mountPath: {{ .Values.gateway.backend.versioningDir }}
+              subPath: versioning
+              readOnly: false
+            {{- end }}
+            {{- if and $internalIAM $iamPersistence.enabled }}
+            - name: iam
+              mountPath: {{ $iamDir | quote }}
+              readOnly: false
+            {{- else if $internalIAM }}
+            - name: data
+              mountPath: {{ $iamDir | quote }}
+              subPath: iam
+              readOnly: false
+            {{- else if not .Values.iam.enabled }}
+            - name: data
+              mountPath: /mnt/iam
+              subPath: iam
+              readOnly: false
+            {{- end }}
+            {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret) }}
+            - name: iam-client-certs
+              mountPath: /iam-client-certs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - name: certificates
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          {{- if .Values.persistence.hostPath }}
+          hostPath:
+            path: {{ .Values.persistence.hostPath }}
+            type: DirectoryOrCreate
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "versitygw.pvcName" . }}
+          {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if and $internalIAM $iamPersistence.enabled }}
+        - name: iam
+          persistentVolumeClaim:
+            claimName: {{ include "versitygw.iamPvcName" . }}
+        {{- end }}
+        {{- if .Values.tls.enabled }}
+        - name: certificates
+          secret:
+            secretName: {{ include "versitygw.certificateSecretName" . }}
+        {{- end }}
+        {{- if and .Values.iam.enabled (eq .Values.iam.type "standalone") (or .Values.iam.standalone.certificate.create .Values.iam.standalone.certificate.existingSecret) }}
+        - name: iam-client-certs
+          secret:
+            secretName: {{ include "versitygw.iamClientCertSecretName" . }}
+            defaultMode: 0440
+        {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

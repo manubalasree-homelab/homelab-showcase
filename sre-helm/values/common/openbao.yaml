@@ -1,0 +1,46 @@
+# Using External Secrets Operator, not OpenBao's own Agent Injector
+# sidecar pattern — ESO syncs into the exact existingSecret names charts
+# already expect, so migrating a secret means no chart wiring changes.
+injector:
+  enabled: false
+
+server:
+  dataStorage:
+    # A handful of small KV secrets — the chart's own 10Gi default is
+    # real overkill for what this actually stores, on a cluster this
+    # disk-constrained.
+    size: 1Gi
+
+  # No resource requests, deliberately — same reasoning as Thanos
+  # elsewhere in this project: OpenBao's server process is a lightweight
+  # Go binary, not a heavy one (unlike, say, Grafana's image-renderer,
+  # which does get explicit requests). Best-effort scheduling over
+  # guaranteed headroom on a cluster this tight.
+  resources: {}
+
+  # ADR-0017: single key-share/threshold unseal key, stored as a plain
+  # Kubernetes Secret (hand-applied, never committed — bootstrapped once
+  # via `bao operator init`, before this Secret can even exist). This
+  # volume mount is why the postStart hook below can read it.
+  extraVolumes:
+    - type: secret
+      name: openbao-unseal-key
+
+  # Auto-unseal on every restart, reading the single key mounted above.
+  # If the Secret doesn't exist yet (a fresh, never-initialized OpenBao),
+  # this exits immediately rather than failing — there's nothing to
+  # unseal with until the one-time `bao operator init` bootstrap has run.
+  postStart:
+    - /bin/sh
+    - -c
+    - |
+      export BAO_ADDR=http://127.0.0.1:8200
+      KEYFILE=/openbao/userconfig/openbao-unseal-key/key
+      [ -f "$KEYFILE" ] || exit 0
+      for i in $(seq 1 60); do
+        bao status >/dev/null 2>&1
+        code=$?
+        if [ "$code" = "0" ]; then exit 0; fi
+        if [ "$code" = "2" ]; then bao operator unseal "$(cat "$KEYFILE")"; exit 0; fi
+        sleep 2
+      done

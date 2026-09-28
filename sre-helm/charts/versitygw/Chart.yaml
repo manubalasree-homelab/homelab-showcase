@@ -1,0 +1,15 @@
+apiVersion: v2
+description: A Helm chart for deploying the Versity S3 Gateway on Kubernetes
+icon: https://raw.githubusercontent.com/versity/versitygw/main/webui/web/assets/images/Versity-logo-blue-horizontal.png
+keywords:
+- s3
+- gateway
+- object-storage
+- posix
+- s3-compatible
+- versity
+name: versitygw
+sources:
+- https://github.com/versity/versitygw
+type: application
+version: 0.4.4

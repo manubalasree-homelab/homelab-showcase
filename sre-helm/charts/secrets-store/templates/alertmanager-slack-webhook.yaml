@@ -1,0 +1,24 @@
+# Syncs into the exact same Secret name/key kube-prometheus-stack's
+# Alertmanager already expects (values/common/kube-prometheus-stack.yaml's
+# alertmanagerSpec.secrets — see docs/incidents.md #24) — no chart wiring
+# changed, only where the value now comes from. creationPolicy: Owner
+# means ESO takes over managing this Secret entirely, replacing the
+# hand-applied one from incident #24.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-slack-webhook
+  namespace: monitoring
+spec:
+  secretStoreRef:
+    name: openbao
+    kind: ClusterSecretStore
+  refreshInterval: 1h
+  target:
+    name: alertmanager-slack-webhook
+    creationPolicy: Owner
+  data:
+    - secretKey: webhook-url
+      remoteRef:
+        key: alertmanager-slack-webhook
+        property: webhook-url

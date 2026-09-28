@@ -1,0 +1,4 @@
+host: grafana.lab
+certSecretName: grafana-gateway-cert
+backendService: kube-prometheus-stack-grafana.monitoring.svc.cluster.local
+backendPort: 80

@@ -1,0 +1,7 @@
+# Cluster-specific: bounds versitygw disk usage for raw-resolution blocks on
+# this cluster's storage. 5m/1h are left unset (Thanos default: never
+# delete) — Thanos hard-enforces --retention.resolution-5m >= 10d, so a
+# matching "3d" there would crash-loop the compactor. Confirmed live.
+compactor:
+  retention:
+    raw: 5d

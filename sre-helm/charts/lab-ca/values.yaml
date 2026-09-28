@@ -1,0 +1,6 @@
+# Must be cert-manager's own namespace (its --cluster-resource-namespace),
+# not an arbitrary namespace — that's where ClusterIssuer.spec.ca.secretName
+# actually looks, regardless of where the Certificate resource itself runs.
+namespace: cert-manager
+caSecretName: lab-ca-root
+commonName: lab-ca

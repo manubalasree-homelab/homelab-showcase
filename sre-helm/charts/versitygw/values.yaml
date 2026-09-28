@@ -1,0 +1,674 @@
+# Default values for versitygw.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Standard Helm chart settings
+nameOverride: ""
+fullnameOverride: ""
+
+# Number of pod replicas for the deployment
+# Note that when using the "posix" backend with a PVC,
+# you can only increase the number of replicas if you have a "ReadWriteMany" volume!
+replicaCount: 1
+
+# Specifies the strategy used to replace old Pods by new ones. strategy.type can be
+# "Recreate" or "RollingUpdate". "RollingUpdate" is the default value.
+# Using "Recreate" is often useful when using a "ReadWriteOnce" volume.
+strategy: {}
+
+# This section defines which image to use and how to pull it.
+# Find all available tags / releases at: https://github.com/versity/versitygw/pkgs/container/versitygw
+image:
+  repository: ghcr.io/versity/versitygw
+  tag: "latest"
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account (e.g. for IRSA / Workload Identity)
+  annotations: {}
+  # Name of the service account to use. If empty, a name is generated using the fullname template.
+  name: ""
+
+# Additional annotations for the pod
+podAnnotations: {}
+# Additional annotations for the Deployment object (for example, a Secret
+# reloader controller that restarts pods after credential/certificate rotation).
+deploymentAnnotations: {}
+# Additional labels for the pod
+podLabels: {}
+
+# Security settings for the Deployment Pod and its containers.
+# The settings below are the recommended, least-privilege values.
+# For more details refer to https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+podSecurityContext:
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+# The Kubernetes Service that exposes the versitygw server.
+# To make the server available outside the cluster, the type should be changed to `NodePort` or `LoadBalancer`.
+service:
+  type: ClusterIP
+
+# --- Ingress ---
+# Expose the S3 API via a Kubernetes Ingress resource.
+# Requires an ingress controller (e.g. nginx, traefik) to be installed in the cluster.
+ingress:
+  enabled: false
+  # IngressClass to use (maps to spec.ingressClassName).
+  # Leave empty to use the cluster default.
+  className: ""
+  # Annotations applied to the Ingress resource.
+  # Use these to configure controller-specific behaviour, e.g.:
+  #   nginx.ingress.kubernetes.io/proxy-body-size: "0"
+  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  #   nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  annotations: {}
+  # List of host rules. Each host can expose one or more paths.
+  # The `servicePort` field on each path selects which named Service port to route to.
+  # Supported values: s3-api (default), admin, webui.
+  hosts:
+    - host: s3.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          # servicePort: s3-api  # default — routes to the S3 API port
+  # TLS configuration. Each entry maps a secret name to one or more hosts.
+  # The secret must contain tls.crt and tls.key.
+  # Example:
+  #   tls:
+  #     - secretName: versitygw-tls
+  #       hosts:
+  #         - s3.example.com
+  tls: []
+
+# --- HTTPRoute ---
+# Expose the S3 API via a Gateway API HTTPRoute resource.
+# Requires Gateway API CRDs and a Gateway API implementation (Envoy Gateway, Istio, Kgateway, etc.) in the cluster.
+httpRoute:
+  enabled: false
+  annotations: {}
+  # The parent Gateway(s) this route attaches to.
+  parentRefs:
+    - name: my-gateway
+      # namespace: gateway-system
+      # sectionName: https
+  # Hostnames for the route.
+  hostnames:
+    - s3.example.com
+  # Rules that define how requests are matched and routed to the service.
+  # See https://gateway-api.sigs.k8s.io/api-types/httproute/#rules
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+
+# --- Root credentials ---
+# The root S3 access credentials. These are required for the gateway to start.
+# IMPORTANT: For production use, set auth.existingSecret instead of storing
+# credentials in this values file.
+auth:
+  # If set, use this existing Kubernetes Secret for credentials instead of creating one.
+  # The secret must contain the keys: rootAccessKeyId and rootSecretAccessKey
+  existingSecret: ""
+  # Root access key ID (used when existingSecret is empty)
+  accessKey: ""
+  # Root secret access key (used when existingSecret is empty)
+  secretKey: ""
+
+# --- Versity Gateway server configuration ---
+gateway:
+  # -- Backend configuration --
+  backend:
+    # The storage backend to use. Supported values: posix, scoutfs, s3, azure, plugin
+    # This maps to the VGW_BACKEND environment variable used by the container entrypoint.
+    type: posix
+    # Additional arguments passed to the backend
+    args: "/mnt/data"
+    # Optional directory for POSIX sidecar metadata storage. When set, the chart
+    # mounts this path from persistent storage and exports VGW_META_SIDECAR.
+    # Must not overlap /mnt/data or versioningDir.
+    sidecarDir: ""
+    # Optional directory for POSIX or ScoutFS object version storage. When set,
+    # the chart mounts this path from persistent storage and exports VGW_VERSIONING_DIR.
+    # Must not overlap /mnt/data or sidecarDir.
+    versioningDir: ""
+    # for s3 backend:
+    # args: "--access 0123456 --secret 0xdeadbeef --endpoint http://s3.example.com"
+    # for azure backend:
+    # args: ""--account 0123456 --access-key 0xdeadbeef"
+    # for posix backend with sidecar metadata:
+    # sidecarDir: "/mnt/metadata"
+    # for posix or scoutfs backend with object versioning:
+    # versioningDir: "/mnt/versioning"
+
+  # The port versitygw listens on for S3 API requests.
+  port: 7070
+  # The AWS region string returned to clients.
+  region: us-east-1
+  # Enable virtual-host-style bucket addressing (e.g. bucket.example.com).
+  # Set to your domain (e.g. "example.com") to enable.
+  virtualDomain: ""
+  # Allow only read (GET/HEAD) operations. Prevents any writes.
+  readOnly: false
+  # Silence stdout request logging (useful when using a dedicated access log).
+  quiet: false
+  # Debug logger verbosity: "silent" (default, no debug output), "debug" (full
+  # request/response logging with secrets and tokens masked), or "unsafe"
+  # (full logging with NO masking -- prints access keys, secrets, session
+  # tokens, and signatures in the clear; only use for local troubleshooting,
+  # never in production).
+  logLevel: silent
+  # Deprecated: use logLevel: debug instead. Kept for backwards compatibility;
+  # only takes effect when logLevel is left at "silent".
+  debug: false
+  # Access log file path for S3 requests (AWS log format). Empty = disabled.
+  accessLog: ""
+  # Default CORS allowed origin. Empty = CORS disabled.
+  # Must include the scheme prefix, e.g. "https://example.com" or "http://example.com".
+  corsAllowOrigin: ""
+  # Disable strict S3 bucket naming validation.
+  disableStrictBucketNames: false
+
+# --- Admin API server ---
+admin:
+  # Enable a separate admin API server on a dedicated port.
+  enabled: false
+  # The port for the admin API server. Must differ from gateway.port.
+  port: 7071
+  # Maximum concurrent connections for the admin server.
+  maxConnections: 250000
+  # Maximum in-flight requests for the admin server.
+  maxRequests: 100000
+  # Serve the admin API under a path prefix (e.g. "/admin"), so an ingress or
+  # HTTPRoute can forward that path to it on a shared hostname. Proxies must
+  # not strip the prefix: requests are signed over the full path. Applies to
+  # admin.port, or to the S3 port when admin.enabled=false. Admin clients,
+  # including webui.adminGateways, must include the prefix in their URL.
+  # Must be "/" followed by one segment of letters, digits, '-', '.', '_', '~'
+  # (not "." or "..").
+  pathPrefix: ""
+  # --- Ingress ---
+  # Expose the Admin API via a Kubernetes Ingress resource.
+  # Requires an ingress controller (e.g. nginx, traefik) to be installed in the cluster.
+  ingress:
+    enabled: false
+    # IngressClass to use (maps to spec.ingressClassName).
+    className: ""
+    annotations: {}
+    hosts:
+      - host: s3-admin.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  # --- HTTPRoute ---
+  # Expose the Admin API via a Gateway API HTTPRoute resource.
+  # Requires Gateway API CRDs and a Gateway API implementation (Envoy Gateway, Istio, Kgateway, etc.) in the cluster.
+  httpRoute:
+    enabled: false
+    annotations: {}
+    # The parent Gateway(s) this route attaches to.
+    parentRefs:
+      - name: my-gateway
+        # namespace: gateway-system
+        # sectionName: https
+    # Hostnames for the route.
+    hostnames:
+      - s3-admin.example.com
+  # Rules that define how requests are matched and routed to the service.
+  # See https://gateway-api.sigs.k8s.io/api-types/httproute/#rules
+    rules:
+      - matches:
+          - path:
+              type: PathPrefix
+              value: /
+
+# --- WebUI ---
+webui:
+  # Enable the built-in browser-based management WebUI.
+  enabled: false
+  # The port the WebUI listens on.
+  port: 8080
+  # Disable TLS for the WebUI even when gateway TLS is enabled.
+  noTls: false
+  # Serve the WebUI under a path prefix on webui.port (e.g. "/ui"). Set the
+  # WebUI ingress/httpRoute path to the same prefix.
+  pathPrefix: ""
+  # Also serve the WebUI on the S3 port under this path prefix (e.g. "/ui"),
+  # reachable through the S3 ingress/httpRoute. Works without webui.enabled;
+  # a bucket named like the prefix is hidden from S3 clients.
+  s3Prefix: ""
+  # List of S3 endpoints used by the  Versity Web UI
+  # The list that is auto-generated by Versity GW is wrong in the case of
+  # Kubernetes because it uses the internal pod IP addresses.
+  apiGateways: []
+  # - s3.example.com
+  # List of Versity Admin endpoints used by the Versity Web UI
+  # The list that is auto-generated by Versity GW is wrong in the case of
+  # Kubernetes because it uses the internal pod IP addresses.
+  adminGateways: []
+  # - s3-admin.example.com
+  # List of standalone IAM service endpoints offered on the WebUI login page.
+  # Unlike the two lists above there is nothing to auto-generate: the IAM
+  # service is a separate process, so the gateway cannot discover its address.
+  # Setting this also tells the WebUI that the standalone IAM service, not the
+  # admin API, manages this deployment: the admin endpoint is ignored entirely
+  # (hidden from the login page along with the Users tab and every other
+  # admin-API surface), and bucket management runs over the S3 API instead.
+  # Point it at iamServer.service (see the iamServer section) or its ingress.
+  iamGateways: []
+  # - https://iam.example.com
+  # --- Ingress ---
+  # Expose the WebUI via a Kubernetes Ingress resource.
+  # Requires an ingress controller (e.g. nginx, traefik) to be installed in the cluster.
+  ingress:
+    enabled: false
+    # IngressClass to use (maps to spec.ingressClassName).
+    className: ""
+    annotations: {}
+    hosts:
+      - host: versitygw.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  # --- HTTPRoute ---
+  # Expose the WebUI via a Gateway API HTTPRoute resource.
+  # Requires Gateway API CRDs and a Gateway API implementation (Envoy Gateway, Istio, Kgateway, etc.) in the cluster.
+  httpRoute:
+    enabled: false
+    annotations: {}
+    # The parent Gateway(s) this route attaches to.
+    parentRefs:
+      - name: my-gateway
+        # namespace: gateway-system
+        # sectionName: https
+    # Hostnames for the route.
+    hostnames:
+      - versitygw.example.com
+  # Rules that define how requests are matched and routed to the service.
+  # See https://gateway-api.sigs.k8s.io/api-types/httproute/#rules
+    rules:
+      - matches:
+          - path:
+              type: PathPrefix
+              value: /
+
+# --- Website Hosting ---
+website:
+  # Enable the static website hosting endpoint.
+  # Serves S3 buckets as static websites with index documents, custom error
+  # pages, and routing rules via a separate HTTP endpoint.
+  enabled: false
+  # The port the website endpoint listens on.
+  port: 8090
+  # Base domain for virtual-host routing. Optional.
+  # Host "blog.<domain>" serves bucket "blog"; host "<domain>" serves
+  # bucket "<domain>" (apex domain support).
+  # When empty, catch-all mode is used: the full hostname is the bucket
+  # name (name buckets as FQDNs, e.g. "blog.example.com").
+  domain: ""
+  # - example: domain: "example.com"
+  # Disable TLS for the website endpoint even when gateway TLS is enabled.
+  noTls: false
+
+# --- IAM (Identity and Access Management) client, consumed by the S3 gateway ---
+iam:
+  enabled: false
+  # TODO: implement other IAM backend (LDAP, Vault-direct, FreeIPA)
+  # - internal: flat-file IAM stored alongside backend data, inside the gateway pod.
+  # - standalone: delegate to a separate standalone IAM API service (an
+  #   AWS-compatible IAM Query API server), reached over its private mTLS
+  #   endpoint. See `iamServer` below to optionally deploy that service from
+  #   this same chart, or point `iam.standalone.endpoint` at an externally
+  #   managed one.
+  # Other values remain available for IAM backends configured through extraEnv.
+  type: internal
+  # Disable IAM result caching.
+  cacheDisable: false
+  # IAM cache entry TTL in seconds.
+  cacheTtl: 120
+  # IAM cache cleanup interval in seconds.
+  cachePrune: 3600
+  # Enable IAM-specific debug output (independent of gateway.logLevel).
+  debug: false
+
+  # --- internal (iam.type: internal) ---
+  # Directory holding the internal IAM data inside the gateway container.
+  # Must be an absolute path outside /mnt/data and the backend sidecarDir and
+  # versioningDir. Only used with iam.enabled and iam.type: internal.
+  dir: /mnt/iam
+  # Store internal IAM data on its own volume. When disabled, it is kept in
+  # the "iam" subdirectory of the backend data volume (see `persistence`).
+  # Existing accounts are not moved when enabling this: copy users.json from
+  # that subdirectory to the new volume first. A PVC created here is deleted
+  # once iam.enabled is false or iam.type is no longer internal.
+  persistence:
+    enabled: false
+    # Whether to create a new PVC. If false, iam.persistence.claimName must be provided.
+    create: true
+    # The name of the PVC that should be created or used (if iam.persistence.create=false)
+    claimName: ""
+    size: 1Gi
+    storageClassName: ""
+    accessMode: ReadWriteOnce
+
+  # --- standalone (iam.type: standalone) ---
+  standalone:
+    # Private endpoint of the standalone IAM service: a "host:port" TCP
+    # address (mTLS required -- see `certificate` below). Leave empty to
+    # auto-target the in-chart private `iamServer` Service
+    # (requires iamServer.enabled=true and iamServer.private.enabled=true).
+    endpoint: ""
+    # Identity this gateway signs its private-endpoint calls with. Both
+    # default to auth.accessKey/secretKey (root) when left empty. Literal
+    # values are retained for compatibility but are stored in Helm release
+    # history; prefer credentials.existingSecret for production.
+    access: ""
+    secret: ""
+    credentials:
+      # Optional Secret containing a distinct IAM client identity. Point this
+      # at iamServer.auth.existingSecret to use that server's root identity.
+      existingSecret: ""
+      accessKeyKey: rootAccessKeyId
+      secretKeyKey: rootSecretAccessKey
+    # POSIX uid/gid/project-id assigned to every account resolved through
+    # this backend (the standalone IAM service has no per-user POSIX
+    # identity concept of its own).
+    defaultUid: 0
+    defaultGid: 0
+    defaultProjectId: 0
+    # mTLS client identity presented to the standalone IAM service's private
+    # endpoint. Required together with the peer trusting this certificate.
+    certificate:
+      # Auto-provision this client certificate via cert-manager. issuerRef
+      # must be a CA-type issuer (Issuer/ClusterIssuer of kind CA, or Vault) --
+      # one that populates ca.crt in the resulting Secret -- and MUST be the
+      # same issuer used for iamServer.private.certificate, so each side's
+      # ca.crt can verify the other's certificate.
+      create: false
+      # Use an existing Secret instead (or as well as -- existingSecret wins
+      # when both are set). Must contain tls.crt, tls.key, and ca.crt (the CA
+      # that signed iamServer's private-listener server certificate).
+      existingSecret: ""
+      issuerRef: {}
+      #   group: cert-manager.io
+      #   kind: ClusterIssuer
+      #   name: internal-ca
+
+# --- Standalone IAM API Server ---
+# Deploys a separate `versitygw iam` server as its own Deployment and public/
+# private Services --
+# an AWS-compatible IAM Query API, independently scalable and centralized
+# (unlike iam.type: internal, which runs file-backed IAM inside each gateway
+# pod). Manage users/roles/policies against its public control-plane API
+# (reusing the gateway root Secret by default, or `iamServer.auth`); point
+# gateways at it via iam.type: standalone.
+iamServer:
+  enabled: false
+  replicaCount: 1
+  # Deployment strategy override for Vault storage. Internal file storage
+  # always uses Recreate to prevent concurrent writers and ReadWriteOnce
+  # multi-attach failures. Empty uses Kubernetes' default RollingUpdate for Vault.
+  strategy: {}
+  auth:
+    # Optional Secret containing rootAccessKeyId and rootSecretAccessKey.
+    # Empty reuses the top-level auth Secret for backward compatibility.
+    existingSecret: ""
+  # Optional image override; defaults to the top-level `image` values when unset.
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+  # Public control-plane API port (aws iam create-user, list-roles, etc.).
+  port: 7070
+  maxConnections: 250000
+  maxRequests: 100000
+  # Silence stdout request logging.
+  quiet: false
+  # Debug logger verbosity: "silent" (default), "debug", or "unsafe" -- see
+  # gateway.logLevel for details.
+  logLevel: silent
+  # Deprecated alias for oidc.disableThumbprintAutofetch below; still honored.
+  disableOidcThumbprintAutofetch: false
+
+  # -- OIDC identity providers (AssumeRoleWithWebIdentity) --
+  oidc:
+    # Reject CreateOpenIDConnectProvider requests that omit ThumbprintList
+    # instead of auto-fetching it over an outbound TLS connection to the
+    # caller-supplied URL. Recommended for restricted/air-gapped clusters.
+    disableThumbprintAutofetch: false
+    # Allow OIDC provider URLs that resolve to loopback/private/link-local
+    # addresses and that carry an explicit port. Both are refused by default,
+    # which makes an in-cluster identity provider -- a SPIFFE/SPIRE OIDC
+    # discovery provider on a ClusterIP Service, say -- impossible to register
+    # or to verify tokens against. Transport is unaffected: still https, still
+    # fully verified.
+    #
+    # This also re-permits cloud metadata endpoints (169.254.169.254) as fetch
+    # targets, so enable it only where CreateOpenIDConnectProvider is already
+    # an administrator-only operation.
+    allowPrivateEndpoints: false
+    # Allow plaintext http OIDC provider URLs and skip TLS certificate
+    # verification (thumbprint pinning included) for https ones, leaving the
+    # network path as the only thing authenticating the identity provider.
+    # Intended for a provider reached over an already-trusted path -- a
+    # discovery provider bound to 127.0.0.1 as a sidecar in the IAM server's
+    # own pod. Needs allowPrivateEndpoints as well for a loopback or
+    # cluster-internal address.
+    allowInsecureTransport: false
+    # Fetch individual providers' discovery documents from somewhere other
+    # than the provider URL itself, as "<provider url>=<discovery url>"
+    # entries. The discovery URL is fetched exactly as written, so include the
+    # "/.well-known/openid-configuration" path, and it may be a private
+    # in-cluster address without allowPrivateEndpoints above -- it is named
+    # here rather than by a request. Only the fetch moves: tokens are still
+    # matched against the provider URL, the fetched document's own issuer must
+    # still equal it, and keys still come from the jwks_uri that document
+    # publishes. This is how an identity provider hands out tokens naming its
+    # public issuer while the gateway reads its keys over a cluster-internal
+    # Service.
+    discoveryUrls: []
+    #  - "https://oidc.example.com=https://oidc.oidc-ns/.well-known/openid-configuration"
+  # Access-Control-Allow-Origin for the control-plane API. Required before a
+  # browser can reach this service: the WebUI is served from another origin, so
+  # every call it makes is cross-origin and is blocked without this. Set it to
+  # the WebUI's own origin (see webui.ingress) when webui.iamGateways points
+  # here. Empty leaves the API usable by CLI and SDK clients only.
+  corsAllowOrigin: ""
+  # Optional TLS for the public control-plane API. No cert-manager automation
+  # here -- bring your own Secret (must contain tls.crt / tls.key).
+  tls:
+    enabled: false
+    secretName: ""
+
+  # -- Storage backend --
+  storage:
+    # internal (file-backed, requires persistence below) | vault
+    type: internal
+    vault:
+      endpointUrl: ""
+      namespace: ""
+      secretStoragePath: ""
+      secretStorageNamespace: ""
+      authMethod: ""
+      authNamespace: ""
+      mountPath: ""
+      roleId: ""
+      # Secret containing sensitive Vault auth material. Recognized keys
+      # (provide whichever your vault-auth-method needs):
+      #   roleSecret -- AppRole secret ID (VGW_IAM_VAULT_ROLE_SECRET)
+      #   rootToken  -- Vault root token   (VGW_IAM_VAULT_ROOT_TOKEN)
+      existingSecret: ""
+      # Separate Secret for Vault's TLS material -- kept distinct from
+      # `existingSecret` above (auth credentials) since these are a different
+      # security concern (transport trust vs. identity). Recognized keys
+      # (provide whichever your vault-endpoint-url/mTLS setup needs):
+      #   serverCert    -- CA cert verifying Vault's server certificate (VGW_IAM_VAULT_SERVER_CERT)
+      #   clientCert    -- client cert for mTLS to Vault               (VGW_IAM_VAULT_CLIENT_CERT)
+      #   clientCertKey -- private key for clientCert                  (VGW_IAM_VAULT_CLIENT_CERT_KEY)
+      # Ignored for any of the three that has a literal value below.
+      tlsExistingSecret: ""
+      # PEM-encoded certificate content (literal text, not a file path).
+      # Prefer tlsExistingSecret above for production; these are stored in
+      # Helm release history in plaintext.
+      serverCert: ""
+      clientCert: ""
+      clientCertKey: ""
+
+  # -- Private mTLS endpoint --
+  # Serves the derive-signing-key/evaluate-policy/resolve-identity calls that
+  # gateways configured with iam.type: standalone use internally. Required
+  # for any such gateway to reach this service over TCP.
+  private:
+    enabled: true
+    port: 7443
+    certificate:
+      # Auto-provision the server certificate for this listener via
+      # cert-manager. issuerRef must be a CA-type issuer -- see
+      # iam.standalone.certificate for the matching client-side requirement.
+      create: false
+      # Use an existing Secret instead (or as well as -- existingSecret wins
+      # when both are set). Must contain tls.crt, tls.key, and ca.crt (the CA
+      # that signs gateway client certificates).
+      existingSecret: ""
+      issuerRef: {}
+      #   group: cert-manager.io
+      #   kind: ClusterIssuer
+      #   name: internal-ca
+      # DNS names for the certificate. Defaults to the in-chart Service's
+      # names when left empty.
+      dnsNames: []
+
+  service:
+    # Type of the public control-plane Service. The private Service is always
+    # ClusterIP and is not exposed when this is NodePort or LoadBalancer.
+    type: ClusterIP
+
+  # Storage for the standalone IAM service's own file-backed data (storage.type: internal).
+  persistence:
+    enabled: true
+    create: true
+    claimName: ""
+    size: 1Gi
+    storageClassName: ""
+    accessMode: ReadWriteOnce
+
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  deploymentAnnotations: {}
+  podAnnotations: {}
+  podLabels: {}
+
+# Extra environment variables to pass to the container.
+# Use this to configure advanced options not covered above (e.g. event notifications,
+# LDAP IAM, S3 proxy backend credentials, StatsD metrics, etc.).
+# Refer to https://github.com/versity/versitygw#configuration for the full list.
+# Example:
+#   extraEnv:
+#     - name: VGW_EVENT_KAFKA_URL
+#       value: "kafka:9092"
+#     - name: VGW_IAM_LDAP_URL
+#       value: "ldap://ldap.example.com"
+extraEnv: []
+
+# --- TLS ---
+# Enable HTTPS for the S3 API (and admin/webui if not separately configured).
+tls:
+  # Set to true to enable TLS. Requires certificate.secretName or certificate.create.
+  enabled: false
+
+# --- cert-manager Certificate ---
+certificate:
+  # Set to the name of an existing TLS Secret to use for HTTPS.
+  # If empty and certificate.create is false, defaults to <fullname>-cert.
+  secretName: ""
+  # Create a cert-manager Certificate resource to automatically provision TLS.
+  # Requires cert-manager to be installed in the cluster.
+  create: false
+  # DNS names to include in the certificate. Required when certificate.create is true.
+  dnsNames: []
+  #  - versitygw.example.com
+  # cert-manager issuer reference. Required when certificate.create is true.
+  # issuerRef:
+  #   group: cert-manager.io
+  #   kind: ClusterIssuer
+  #   name: "letsencrypt-production"
+
+# --- Persistence ---
+# Storage for the S3 gateway backend data (required for posix/scoutfs backends).
+# By default, an emptyDir (ephemeral) volume is used.
+persistence:
+  # If disabled, an emptyDir (ephemeral!) will be used instead of a PVC.
+  # NOTE: Data will be lost on pod restart if persistence is disabled.
+  enabled: true
+  # Whether to create a new PVC. If false, persistence.claimName must be provided.
+  create: true
+  # The name of the PVC that should be created or used (if persistence.create=false)
+  claimName: ""
+  size: 10Gi
+  storageClassName: ""
+  # If set then use a hostPath volume, needs `persistence.create=false`
+  hostPath: ""
+  # Access mode for the PVC. Use ReadWriteMany for multi-replica deployments.
+  accessMode: ReadWriteOnce
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 500m
+  #   memory: 512Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Topology spread constraints to control how pods are distributed across
+# topology domains (e.g. nodes, zones). Useful for spreading replicas for
+# high availability. See:
+# https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
+# Example:
+#   topologySpreadConstraints:
+#     - maxSkew: 1
+#       topologyKey: topology.kubernetes.io/zone
+#       whenUnsatisfiable: ScheduleAnyway
+#       labelSelector:
+#         matchLabels:
+#           app.kubernetes.io/name: versitygw
+topologySpreadConstraints: []
+
+networkPolicy:
+  enabled: false
+  # Label maps used as matchLabels selectors. When both are set, a source pod
+  # must match both selectors. A pod-only selector applies to this release's
+  # namespace; an empty pair denies ingress to the gateway. The IAM policy
+  # always permits this release's gateway pods to reach its private mTLS port.
+  allowIngressFromNamespaces: {}
+  #   kubernetes.io/metadata.name: kube-system
+  allowIngressFromPods: {}
+  #   svccontroller.k3s.cattle.io/svcname: versitygw

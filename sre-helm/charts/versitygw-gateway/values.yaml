@@ -1,0 +1,4 @@
+host: versitygw.lab   # placeholder — pure-IP access via /etc/hosts, same pattern as argocd.lab
+certSecretName: versitygw-gateway-cert
+backendService: versitygw.versitygw.svc.cluster.local
+backendPort: 7070   # the S3 API port only — the WebUI (8080) stays on port-forward for now

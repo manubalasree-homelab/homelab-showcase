@@ -1,0 +1,5 @@
+apiVersion: v2
+name: lab-ca
+description: A ClusterIssuer for platform-deployed apps, independent of Rancher's own `rancher` Issuer — a bootstrap self-signed Issuer mints a CA Certificate, which backs the actual ClusterIssuer everything else uses
+type: application
+version: 0.1.0

@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: kiali
+  namespace: istio-system
+spec:
+  hosts:
+    - {{ .Values.host }}
+  gateways:
+    - kiali-gateway
+  http:
+    - route:
+        - destination:
+            host: {{ .Values.backendService }}
+            port:
+              number: {{ .Values.backendPort }}

@@ -1,0 +1,18 @@
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: versitygw-gateway
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 443
+        name: https-versitygw
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: {{ .Values.certSecretName }}
+      hosts:
+        - {{ .Values.host }}

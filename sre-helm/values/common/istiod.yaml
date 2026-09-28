@@ -1,0 +1,19 @@
+meshConfig:
+  extensionProviders:
+    - name: tempo
+      opentelemetry:
+        port: 4317
+        service: tempo.tempo.svc.cluster.local
+    # "prometheus" has to be explicitly registered here even though it's a
+    # built-in provider type (istiod ships a compiled-in default entry of
+    # this name, visible in its own /debug/mesh output) — that compiled-in
+    # default is apparently not enough on its own for the native stats
+    # filter to be generated; only registering it here made it work.
+    # Confirmed empirically (docs/incidents.md #14 resolution) after
+    # extensive source-level investigation; not documented anywhere as a
+    # requirement.
+    - name: prometheus
+      prometheus: {}
+  defaultProviders:
+    tracing:
+      - tempo

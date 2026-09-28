@@ -1,0 +1,23 @@
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: mesh-tracing
+  namespace: istio-system
+spec:
+  # No selector = applies mesh-wide, to every sidecar-injected pod
+  # (ADR-0012/0013) plus the ingress gateway.
+  #
+  # IMPORTANT — tracing and metrics MUST stay in this one Telemetry object,
+  # never split into a second mesh-wide (no-selector) Telemetry resource in
+  # this namespace. Istio's own internal namespaceWideTelemetryConfig()
+  # picks the FIRST mesh-wide Telemetry object it finds per namespace and
+  # silently ignores any others — it does not merge them. A second
+  # mesh-wide Telemetry object here doesn't error, doesn't warn, and just
+  # gets ignored, which is exactly what caused the istio_requests_total gap
+  # in docs/incidents.md #14 for as long as it did. Confirmed by reading
+  # Istio's own source (pilot/pkg/model/telemetry.go).
+  tracing:
+    - randomSamplingPercentage: {{ .Values.randomSamplingPercentage }}
+  metrics:
+    - providers:
+        - name: prometheus

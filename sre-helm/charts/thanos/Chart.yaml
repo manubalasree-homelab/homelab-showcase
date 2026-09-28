@@ -1,0 +1,11 @@
+apiVersion: v2
+name: thanos
+description: >
+  Thanos Query, Store Gateway, and Compactor — hand-written, not vendored.
+  bitnami/thanos now requires Docker Hub auth even for a public OCI pull
+  (Broadcom's registry migration), which doesn't fit this repo's vendoring
+  model (ADR-0011); no other actively-maintained free chart exists. Reads
+  the same versitygw S3 bucket the kube-prometheus-stack Prometheus's
+  Thanos sidecar uploads TSDB blocks to.
+type: application
+version: 0.1.0

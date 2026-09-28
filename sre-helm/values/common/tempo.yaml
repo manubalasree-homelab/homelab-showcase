@@ -1,0 +1,32 @@
+tempo:
+  extraArgs:
+    config.expand-env: "true"
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3-credentials   # hand-applied, reuses versitygw's root creds — no scoped IAM exists in versitygw yet
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: tempo-traces
+        endpoint: versitygw.versitygw.svc.cluster.local:7070
+        insecure: true   # versitygw's internal port is plain HTTP — TLS terminates at Istio, not here
+        access_key: "${TEMPO_S3_ACCESS_KEY}"
+        secret_key: "${TEMPO_S3_SECRET_KEY}"
+  # TraceQL metrics queries (e.g. Grafana's `... | rate() by (...)`) on recent,
+  # not-yet-flushed spans need the metrics-generator's local-blocks processor
+  # running — without it there's no generator to register in the query-routing
+  # ring at all, which is what "error finding generators: empty ring" means.
+  # Scoped to just local-blocks (not service-graphs/span-metrics): those two
+  # push aggregated metrics to Prometheus via remote_write, which needs
+  # Prometheus's remote-write receiver enabled too — a separate change, not
+  # needed for TraceQL metrics queries themselves.
+  metricsGenerator:
+    enabled: true
+    processor:
+      local_blocks: {}
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - local-blocks

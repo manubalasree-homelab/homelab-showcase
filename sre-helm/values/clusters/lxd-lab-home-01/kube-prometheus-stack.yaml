@@ -1,0 +1,14 @@
+# 3 days of local retention — more than the bare bridge Thanos's sidecar
+# needs (its 2h block-cut interval only requires a couple hours' margin),
+# a deliberate buffer so recent-history queries don't have to round-trip
+# through Thanos/versitygw. Full long-term history still lives in Thanos
+# regardless (raw 5d, then indefinite at 5m/1h resolution — see thanos.yaml).
+#
+# This also affects the SLO burn-rate ticket tier (charts/bookinfo): its
+# window was shrunk from the textbook 3d to 48h specifically because local
+# retention was 2d at the time (ADR-0016). 3d local retention doesn't
+# retroactively widen that window back out on its own — revisit ADR-0016
+# if this is meant to change that too.
+prometheus:
+  prometheusSpec:
+    retention: 3d

@@ -1,0 +1,42 @@
+name: Bootstrap ArgoCD
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  bootstrap:
+    runs-on: [self-hosted, linux, x64, homelab]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The repo-credential secrets are a deliberate one-time manual step (Q7 in the
+      # design session; see docs/how-the-bootstrap-works.md) — this workflow verifies
+      # them rather than recreating them, since the private keys were never persisted
+      # anywhere this workflow could read them from.
+      - name: Verify repo-credential secrets exist
+        run: |
+          kubectl -n argocd get secret sre-gitops-bootstrap-repo sre-helm-repo \
+            || { echo "::error::Repo-credential secrets missing in the argocd namespace — see docs/how-the-bootstrap-works.md for how to recreate them by hand."; exit 1; }
+
+      - name: Add argo Helm repo
+        run: |
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update argo
+
+      - name: Install/upgrade ArgoCD
+        run: |
+          helm upgrade -i --atomic --timeout 20m --history-max 5 \
+            argocd argo/argo-cd \
+            -f bootstrap/argocd/values.yaml \
+            -n argocd --create-namespace \
+            --version 10.9.2
+
+      - name: Apply the Root Application
+        run: kubectl apply -f bootstrap/roots/lxd-lab-home-01.yaml
+
+      - name: Wait for the Root to sync
+        run: |
+          kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced \
+            application/root-lxd-lab-home-01 --timeout=180s

@@ -1,0 +1,7 @@
+server:
+  service:
+    type: ClusterIP
+
+configs:
+  params:
+    server.insecure: true   # TLS now terminates at the Istio Gateway (lab-ca cert), not argocd-server itself

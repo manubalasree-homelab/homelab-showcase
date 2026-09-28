@@ -1,0 +1,4 @@
+apiVersion: v2
+name: secrets-store
+description: ClusterSecretStore + ExternalSecret objects wiring OpenBao secrets into existing Kubernetes Secret names (ADR-0017). Hand-written, not vendored — this is project-specific config, not a third-party chart.
+version: 0.1.0

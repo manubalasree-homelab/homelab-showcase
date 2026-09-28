@@ -1,0 +1,21 @@
+# Every sidecar-injected pod (ADR-0012/0013) carries this label automatically
+# — added by the injection webhook itself, not something we set. The gateway
+# is a separate PodMonitor (ingressgateway-podmonitor.yaml) because it's not
+# webhook-injected and never carries this label.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: istio-sidecars
+  namespace: istio-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      security.istio.io/tlsMode: istio
+  podMetricsEndpoints:
+    - port: http-envoy-prom   # containerPort 15090, same named port as the gateway's Envoy
+      path: /stats/prometheus
+      interval: 30s

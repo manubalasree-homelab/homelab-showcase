@@ -1,0 +1,249 @@
+env: lab
+
+sreHelm:
+  repoURL: git@github.com:manubalasree-homelab/sre-helm.git
+  revision: v1.39.0   # pinned, not main — semantic-released tag; a Component can override with its own targetRevision: field
+
+clusters:
+  - name: lxd-lab-home-01
+    provider: lxd
+    server: https://kubernetes.default.svc
+
+components:
+  argocd:
+    enabled: true
+    namespace: argocd
+    autoSync: false   # vendored chart — sre-helm is updated/tagged on our schedule, cluster sync stays manual until reviewed
+    chart:
+      path: charts/argo-cd
+
+  hello:
+    enabled: true
+    namespace: hello
+    chart:
+      path: charts/hello
+
+  metallb:
+    enabled: true
+    namespace: metallb-system
+    autoSync: false
+    syncWave: "0"
+    chart:
+      path: charts/metallb   # vendored — ADR-0011
+
+  metallb-config:
+    enabled: true
+    namespace: metallb-system
+    autoSync: false
+    syncWave: "1"   # after metallb — its CRDs must exist before these CRs can apply
+    chart:
+      path: charts/metallb-config
+
+  lab-ca:
+    enabled: true
+    namespace: cert-manager   # must match cert-manager's own namespace — see charts/lab-ca/values.yaml
+    autoSync: false   # PKI material — reviewed before it applies, same governance as argocd/metallb
+    chart:
+      path: charts/lab-ca
+
+  versitygw:
+    enabled: true
+    namespace: versitygw
+    autoSync: false   # new/untested, real data — reviewed before it applies
+    chart:
+      path: charts/versitygw   # vendored — ADR-0010, patches a readiness-probe bug in 0.4.4
+
+  # Istio, per ADR-0005: istio-base -> istiod -> istio-ingressgateway, sync-wave
+  # ordered (CRDs must exist before istiod, istiod before the gateway registers).
+  # Chart names are the current upstream ones (base/istiod/gateway) — ADR-0005
+  # predates a Helm chart rename from "istio-ingressgateway" to "gateway"; the
+  # Component key keeps the ADR's original name for continuity.
+  istio-base:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "0"
+    chart:
+      path: charts/istio-base   # vendored — ADR-0011
+
+  istiod:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "1"
+    chart:
+      path: charts/istiod   # vendored — ADR-0011
+
+  istio-ingressgateway:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "2"
+    chart:
+      path: charts/istio-ingressgateway   # vendored — ADR-0011; service.type: LoadBalancer is this chart's own default — MetalLB picks it up automatically
+
+  argocd-gateway:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "3"   # after istio-ingressgateway — Gateway needs the ingress gateway's Envoy already running
+    chart:
+      path: charts/argocd-gateway
+
+  versitygw-gateway:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "3"
+    chart:
+      path: charts/versitygw-gateway
+
+  kiali:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "1"   # after istio-base/istiod's CRDs and mesh config exist
+    chart:
+      path: charts/kiali
+
+  kiali-gateway:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "3"
+    chart:
+      path: charts/kiali-gateway
+
+  kube-prometheus-stack:
+    enabled: true
+    namespace: monitoring
+    autoSync: false
+    chart:
+      path: charts/kube-prometheus-stack
+
+  grafana-gateway:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "3"
+    chart:
+      path: charts/grafana-gateway
+
+  tempo:
+    enabled: true
+    namespace: tempo
+    autoSync: false
+    chart:
+      path: charts/tempo
+
+  istio-tracing:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "3"   # after istio-ingressgateway (and tempo should exist first, but no hard ordering enforced here)
+    chart:
+      path: charts/istio-tracing
+
+  # Wave 3, Phase 4 (ROADMAP): logs in Grafana, backed by versitygw (ADR-0009),
+  # same env-var-substituted-credentials pattern as tempo.
+  loki:
+    enabled: true
+    namespace: loki
+    autoSync: false
+    chart:
+      path: charts/loki   # vendored — ADR-0011
+
+  vector:
+    enabled: true
+    namespace: vector
+    autoSync: false
+    syncWave: "1"   # after loki — not a hard dependency (vector buffers/retries), but avoids a noisy first-boot connection-refused period
+    chart:
+      path: charts/vector   # vendored — ADR-0011
+
+  # Wave 3, Phase 5 (ROADMAP): metrics history beyond local Prometheus
+  # retention, backed by versitygw. Hand-written chart (not vendored) —
+  # bitnami/thanos now requires Docker Hub auth even for a public pull, see
+  # docs/incidents.md #13. Same namespace as kube-prometheus-stack: Query
+  # talks to the Prometheus sidecar and Store Gateway by static in-namespace
+  # Service address.
+  thanos:
+    enabled: true
+    namespace: monitoring
+    autoSync: false
+    chart:
+      path: charts/thanos
+
+  # PodMonitor for istio-ingressgateway's Envoy/pilot-agent stats +
+  # ServiceMonitor for Kiali's own metrics. Does not cover
+  # istio_requests_total-style request metrics — see chart description /
+  # docs/incidents.md.
+  istio-monitors:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    chart:
+      path: charts/istio-monitors
+
+  # ADR-0012: sidecar injection for apps actually routed through Istio.
+  # syncWave "0" — declares the Namespace objects it labels directly, so it
+  # doesn't depend on any other Component's CreateNamespace=true.
+  istio-injection:
+    enabled: true
+    namespace: istio-system   # only matters for the Application's own bookkeeping — this chart's resources aren't namespaced to one namespace
+    autoSync: false
+    syncWave: "0"
+    chart:
+      path: charts/istio-injection
+
+  # Istio's own Bookinfo sample app + an HPA on productpage — docs/incidents.md
+  # #21 has the full design reasoning, docs/how-bookinfo-and-hpa-works.md
+  # explains how it all fits together.
+  bookinfo:
+    enabled: true
+    namespace: bookinfo
+    autoSync: false
+    chart:
+      path: charts/bookinfo
+
+  bookinfo-gateway:
+    enabled: true
+    namespace: istio-system
+    autoSync: false
+    syncWave: "3"
+    chart:
+      path: charts/bookinfo-gateway
+
+  # ADR-0017: secrets management, scoped to alertmanager-slack-webhook
+  # only for now — see that ADR for the remaining migration TODO and the
+  # unseal-key security tradeoff this deliberately makes.
+  openbao:
+    enabled: true
+    namespace: openbao
+    autoSync: false
+    syncWave: "0"
+    chart:
+      path: charts/openbao
+
+  external-secrets:
+    enabled: true
+    namespace: external-secrets
+    autoSync: false
+    syncWave: "1"   # after openbao — not a hard startup dependency, but
+                     # its ClusterSecretStore is pointless before openbao exists
+    chart:
+      path: charts/external-secrets
+
+  # Hand-written, not vendored (charts/secrets-store/Chart.yaml explains
+  # why) — the ClusterSecretStore + ExternalSecret objects actually wiring
+  # OpenBao into existing Secret names. syncWave after both openbao and
+  # external-secrets, since the ClusterSecretStore needs both to exist and
+  # be configured (the Kubernetes auth role, specifically) before it means
+  # anything.
+  secrets-store:
+    enabled: true
+    namespace: monitoring
+    autoSync: false
+    syncWave: "2"
+    chart:
+      path: charts/secrets-store

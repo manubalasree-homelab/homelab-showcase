@@ -1,0 +1,4 @@
+host: bookinfo.lab
+certSecretName: bookinfo-gateway-cert
+backendService: productpage.bookinfo.svc.cluster.local
+backendPort: 9080

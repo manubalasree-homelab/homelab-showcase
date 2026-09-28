@@ -1,0 +1,61 @@
+{{- $env := .Values.env }}
+{{- $cluster := .Values.thisCluster }}
+{{- $sreHelm := .Values.sreHelm }}
+{{- range $name, $component := .Values.components }}
+{{- if $component.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $name }}-{{ $cluster }}
+  namespace: argocd
+  {{- if $component.syncWave }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "{{ $component.syncWave }}"
+  {{- end }}
+spec:
+  project: {{ $env }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $component.namespace }}
+  syncPolicy:
+    {{- if ne $component.autoSync false }}
+    automated:
+      prune: true
+      selfHeal: true
+    {{- end }}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true   # avoids client-side apply's last-applied-configuration
+        # annotation, which large CRDs (kube-prometheus-stack's) exceed the 256KiB
+        # limit for — ArgoCD's documented fix, applied globally rather than as a
+        # kube-prometheus-stack-specific special case
+  sources:
+    {{- if $component.chart.path }}
+    - repoURL: {{ $sreHelm.repoURL }}
+      targetRevision: {{ $component.targetRevision | default $sreHelm.revision }}
+      path: {{ $component.chart.path }}
+      helm:
+        releaseName: {{ $name }}
+        valueFiles:
+          - $values/values/common/{{ $name }}.yaml
+          - $values/values/providers/{{ $component.provider | default "none" }}/{{ $name }}.yaml
+          - $values/values/clusters/{{ $cluster }}/{{ $name }}.yaml
+        ignoreMissingValueFiles: true
+    {{- else }}
+    - repoURL: {{ $component.chart.repoURL }}
+      chart: {{ $component.chart.name }}
+      targetRevision: {{ $component.chart.version }}
+      helm:
+        releaseName: {{ $name }}
+        valueFiles:
+          - $values/values/common/{{ $name }}.yaml
+          - $values/values/providers/{{ $component.provider | default "none" }}/{{ $name }}.yaml
+          - $values/values/clusters/{{ $cluster }}/{{ $name }}.yaml
+        ignoreMissingValueFiles: true
+    {{- end }}
+    - repoURL: {{ $sreHelm.repoURL }}
+      targetRevision: {{ $sreHelm.revision }}
+      ref: values
+{{- end }}
+{{- end }}
