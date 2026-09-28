@@ -18,4 +18,4 @@ mirrors their actual chart/config content, minus internal working docs
 best starting points for understanding how this fits together.
 
 The fuller story — why each decision was made, what broke and how it got
-fixed — is written up as a blog series, not duplicated here.
+fixed — is written up as a [blog](https://blog.virtmicro.com/sre/homelab/building-an-observability-platform/) series, not duplicated here.
